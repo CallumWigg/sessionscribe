@@ -1,0 +1,66 @@
+#IMPORT PY
+
+#IMPORT RESOURCES
+
+
+#MAIN MENU
+    GENERAL FUNCTIONS
+        #Prepare Recording
+        #Prepare Transcription
+        #Open dictionary
+        #Update dictionary
+        #Sort dictionary
+	#Batch Functions
+
+    CAMPAIGN FUNCTIONS (list campaigns below)
+        #Open transcription library 1
+        #Open transcription library 2 etc
+
+
+#PREPARE RECORDING
+    check all folders in config
+    find audio files which don't have a "_norm" option
+    if there is an audio file in the folder which doesn't follow the right format, ask if the user would like to correct it.
+    present a number of options (recent to oldest) to the user, which do they want to convert? 1,2,3,4,5,
+        0 (zero is all, print num to be altered).
+        x (blacklist ones, save those to config to ensure they don't get prompted about again)
+    when selection is made, ask if you'd like to transcribe too?
+    Ask if they'd like to fill out the metadata, automatically fill in the number, artist, album, year, and genre.
+    Prompt user for the title. "-" leaves it blank
+    run [norm_to_mp3] and depending on request the [batch transcription].
+    if transcription is run, on completion, [transcription_combine] the .md, [corrections_replace] and update dictionary [dict_create].
+    prompt user "{file details} normalised, transcribed, transcription library collated (and corrected), dictionary updated."
+
+#PREPARE TRANSCRIPTION
+    check all folders in config
+    find audio files which DO have "_norm"
+    if there isn't a transcription, ask if user wants to transcribe
+    present a number of options (recent to oldest) to the user, which do they want to convert? 1,2,3,4,5,
+        0 (zero is all, say how many).
+        x (blacklist ones, save those to config to ensure they don't get prompted about again)
+        r (redo a transcription if theres one thats bad)
+    on completion, [transcription_combine] the .md, [corrections_replace] and update dictionary [dict_create].
+    prompt user "{file details} transcribed, transcription library collated (and corrected), dictionary updated."
+
+#OPEN DICTIONARY
+    open dictionary for adding corrections
+
+#UPDATE DICTIONARY
+    run the [dict_create] function on everything
+    print num of new wack words found
+
+#SORT DICTIONARY
+    [sort_lines]
+    print alphabetized
+
+#PERFORM CORRECTIONS
+    [corrections_replace]
+    print num of words replaced
+
+#BATCH FUNCTIONS
+    a set of functions for en-masse importing recordings
+    big warnings saying "THIS WILL TAKE A LONG TIME"
+    set up a queue in the batch_queue.json file
+    If there is already something in the queue, ask if they'd like to continue with that, or start a new one
+    start off by running normalisations of everything first, then do transcriptions of everything
+    keep place in queue, and work thru it slowly. mark files off queue when theyre done.

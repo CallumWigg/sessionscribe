@@ -1,9 +1,0 @@
-antlr4-python3-runtime==4.9.3
-faster-whisper==0.5.1
-fuzzywuzzy==0.18.0
-Levenshtein==0.21.0
-mutagen==1.46.0
-numpy==1.24.3
-pyenchant==3.2.2
-python-Levenshtein==0.21.0
-rapidfuzz==3.0.0

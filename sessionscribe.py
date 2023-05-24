@@ -12,7 +12,7 @@ from fuzzywuzzy import process
 from faster_whisper import WhisperModel
 
 # File locations
-working_directory = os.getcwd()  # Working directory for trawling
+working_directory = os.path.dirname(os.getcwd())  # Working directory for trawling
 dictionary_file = os.path.join(working_directory, "sessionscribe\\wack_dictionary.txt")  # Dictionary file location
 correction_list_file = os.path.join(working_directory, "sessionscribe\\corrections.txt") # Correction list file location
 

@@ -53,7 +53,8 @@ you can change the other names, but only if you're more competant than me (low b
         - sessionscribe.py
 
 ### to do
-- [ ] Track number should be automated
 - [ ] Would be good if user could run one specific function instead of having complete all in linear fashion
 - [ ] All non-standard words should be run through fuzzywuzzy comparing to the enchant standard dict to fix normal word errors
-- [ ] Mass encoding, transcribing, and combination would be neat for users who haven't already done this manually for > 50 sessions. *Sigh*
+- [ ] Mass encoding, transcribing, and combination would be neat for users who haven't already done this manually for > 50 sessions. _Sigh_
+- [ ] Basic competency in error management should be employed. Currently, it is _very_ easy to break things.
+- [ ] Podcast api uploading! Very easy with most services if you pay, would be nice to work around, could do with selenium etc?

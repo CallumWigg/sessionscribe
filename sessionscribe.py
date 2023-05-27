@@ -47,7 +47,7 @@ def get_user_input():
             print("Invalid input. Please enter a number.")
 
 # Function to convert an audio file to MP3 format and apply metadata
-def convert_to_mp3(file_path, title, track_number):
+def convert_to_mp3(file_path, title):
     # Get the file name and directory separately
     #print(str(file_path))
     input_dir, input_file = os.path.split(file_path)
@@ -68,10 +68,23 @@ def convert_to_mp3(file_path, title, track_number):
     cmd = ['ffmpeg', '-i', file_path, '-af', 'loudnorm', '-c:a', 'libmp3lame', '-b:a', str(target_bitrate)+'k', output_path]
     subprocess.run(cmd, check=True)
 
+    # Find the highest track number in existing files
+    existing_files = [f for f in os.listdir(input_dir) if f.endswith('.mp3') and f != output_file]
+    existing_track_numbers = []
+    for f in existing_files:
+        audio = MP3(os.path.join(input_dir, f))
+        track_num = str(audio.get('TRCK', ''))
+        if track_num:
+            existing_track_numbers.append(int(track_num.split('/')[0]))
+    highest_track_number = max(existing_track_numbers) if existing_track_numbers else 0
+
+    # Increment the track number for the new file
+    new_track_number = highest_track_number + 1
+
     # Apply metadata to the audio files, original then new
     with taglib.File(file_path, save_on_exit=True) as song:
         song.tags["TITLE"] = [str(title)]
-        song.tags["TRACKNUMBER"] = [str(track_number)]
+        song.tags["TRACKNUMBER"] = [str(new_track_number)]
         song.tags["ARTIST"] = ["Snek Podcasts"]
         song.tags["GENRE"] = ["Podcast"]
         song.tags["DATE"] = [str(year)]
@@ -79,7 +92,7 @@ def convert_to_mp3(file_path, title, track_number):
 
     with taglib.File(output_path, save_on_exit=True) as song:
         song.tags["TITLE"] = [str(title)]
-        song.tags["TRACKNUMBER"] = [str(track_number)]
+        song.tags["TRACKNUMBER"] = [str(new_track_number)]
         song.tags["ARTIST"] = ["Snek Podcasts"]
         song.tags["GENRE"] = ["Podcast"]
         song.tags["DATE"] = [str(year)]
@@ -165,8 +178,8 @@ def transcribe_combine(directory):
 
 # Function to update a dictionary file with new words from the mass transcription file
 def dictionary_update(md_path, dictionary_file):
-    # Create a dictionary object using the 'en_US' dictionary
-    dictionary = enchant.Dict("en_US")
+    # Create a dictionary object using the 'en_AU' dictionary
+    dictionary = enchant.Dict("en_AU")
 
     # Open the input file
     with open(md_path, "r", encoding="utf-8", errors="ignore") as file:
@@ -266,7 +279,6 @@ def main():
 
     # Prompt the user for metadata: Title, Track Number
     title = input("Enter the title: ")
-    track_number = input("Enter the track number: ")
 
     # Run the selected file through the convert_to_mp3 function and apply metadata
     normalised_path = convert_to_mp3(selected_file, title, track_number)

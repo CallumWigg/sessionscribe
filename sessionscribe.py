@@ -1,15 +1,16 @@
-import os
-import subprocess
-import math
 import datetime
-import taglib
-from mutagen.mp3 import MP3
-import enchant
+import math
+import os
 import re
+import subprocess
+import sys
 import unicodedata
-from fuzzywuzzy import fuzz
-from fuzzywuzzy import process
+
+import enchant
+import taglib
 from faster_whisper import WhisperModel
+from fuzzywuzzy import fuzz, process
+from mutagen.mp3 import MP3
 
 # File locations
 working_directory = os.path.dirname(os.getcwd())  # Working directory for trawling
@@ -164,9 +165,9 @@ def transcribe_combine(directory):
     return output_file.name
 
 # Function to update a dictionary file with new words from the mass transcription file
-def dictionary_update(md_path, dictionary_file):
+def dictionary_update(md_path):
     # Create a dictionary object using the 'en_US' dictionary
-    dictionary = enchant.Dict("en_US")
+    dictionary = enchant.Dict("en_AU")
 
     # Open the input file
     with open(md_path, "r", encoding="utf-8", errors="ignore") as file:
@@ -237,7 +238,7 @@ def fuzzy_fix():
 def corrections_replace(file_path):
     # Load dictionary
     replacements = {}
-    with open(dictionary_file, 'r') as f:
+    with open(correction_list_file, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if ' -> ' in line:
@@ -245,22 +246,41 @@ def corrections_replace(file_path):
                 if replacement:
                     replacements[original] = replacement
 
+
     # Perform replacements
-    with open(file_path, 'r') as f:
+    with open(file_path, 'r', encoding='utf-8') as f:
         text = f.read()
         for original, replacement in replacements.items():
-            text = text.replace(original, replacement)
+            pattern = r'\b' + re.escape(original) + r'\b'
+            text = re.sub(pattern, replacement, text)
+            print(f'Replacing instance of: "{replacement}"')
 
     # Save output
-    with open(file_path, 'w') as f:
+    with open(file_path, 'w', encoding='utf-8') as f:
         f.write(text)
 
-# Main script logic
+# Define the split functions
+def process_arguments():
+    if "--update" in sys.argv and len(sys.argv) >= 3:
+        campaign = sys.argv[sys.argv.index("--update") + 1]
+        campaign_folder = os.path.join(working_directory,campaign)
+        md_location = transcribe_combine(campaign_folder)
+        print(f'\nstarting dictionary_update at {md_location}')
+        dictionary_update(md_location)
+        print('\nstarting fuzzy_fix')
+        fuzzy_fix()
+        print(f'\nstarting corrections_replace at {md_location}')
+        corrections_replace(md_location)
+        print('\ndone')
+    else:
+        main()
+
 def main():
     # Search for audio files created in the last 3 days in the current and lower directories
     # Print the names of the audio files with corresponding numbers
     audio_files = search_audio_files()
     print_options(audio_files)
+    
     # Prompt the user for input to select a file using the number
     selected_file = audio_files[get_user_input()-1]
 
@@ -278,7 +298,7 @@ def main():
     md_location = transcribe_combine(campaign_folder)
 
     # Run the dictionary_update function on the mass transcription file
-    dictionary_update(md_location, dictionary_file)
+    dictionary_update(md_location)
 
     # Run the fuzzywuzzy0 function on the wack_words and correction_list files
     fuzzy_fix()
@@ -286,6 +306,6 @@ def main():
     # Run the corrections_replace function on the mass transcription file
     corrections_replace(md_location)
 
-# Call the main function to start the script
+# Call the process_arguments function to check command line arguments and execute the appropriate functions
 if __name__ == "__main__":
-    main()
+    process_arguments()

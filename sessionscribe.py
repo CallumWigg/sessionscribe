@@ -14,7 +14,7 @@ from mutagen.mp4 import MP4
 from spellchecker import SpellChecker
 
 # File locations
-working_directory = os.path.dirname(os.getcwd())  # Working directory for trawling
+working_directory = os.path.dirname(os.getcwd()) # Working directory for trawling
 dictionary_file = os.path.join(working_directory, "sessionscribe\\wack_dictionary.txt")  # Dictionary file location
 correction_list_file = os.path.join(working_directory, "sessionscribe\\corrections.txt") # Correction list file location
 
@@ -27,7 +27,7 @@ def search_audio_files():
     # Recursively search for audio files in the directory and its subdirectories
     for root, dirs, files in os.walk(working_directory):
         for file in files:
-            if file.endswith((".wav",".m4a")):
+            if file.endswith((".wav",".m4a",".flac")):
                 file_path = os.path.join(root, file)
                 file_modified_time = datetime.datetime.fromtimestamp(os.path.getmtime(file_path))
                 if file_modified_time >= three_days_ago:
@@ -51,7 +51,6 @@ def get_user_input():
 # Function to convert an audio file to m4a format and apply metadata
 def convert_to_m4a(file_path, title):
     # Get the file name and directory separately
-    #print(str(file_path))
     input_dir, input_file = os.path.split(file_path)
     cmd = ['ffprobe', '-i', file_path, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=p=0']
     output = subprocess.check_output(cmd, universal_newlines=True)
@@ -91,6 +90,7 @@ def convert_to_m4a(file_path, title):
         song.tags["GENRE"] = ["Podcast"]
         song.tags["DATE"] = [str(year)]
         song.tags["ALBUM"] = [str(os.path.basename(os.path.dirname(input_dir)))]
+        song.save()
 
     with taglib.File(output_path, save_on_exit=True) as song:
         song.tags["TITLE"] = [str(title)]
@@ -99,6 +99,7 @@ def convert_to_m4a(file_path, title):
         song.tags["GENRE"] = ["Podcast"]
         song.tags["DATE"] = [str(year)]
         song.tags["ALBUM"] = [str(os.path.basename(os.path.dirname(input_dir)))]
+        song.save()
 
     print(f'\n\nSuccessfully converted {file_path} to {output_path} with {target_bitrate} kbps bitrate and applied metadata.\n\n')
     return output_path
@@ -108,7 +109,7 @@ def transcribe_audio(input_dir):
     parent_dir = os.path.dirname(os.path.dirname(input_dir))
     transcriptions_folder = next((folder for folder in os.listdir(parent_dir) if os.path.isdir(os.path.join(parent_dir, folder)) and "Transcriptions" in folder), None)
     output_dir = os.path.join(parent_dir, transcriptions_folder) if transcriptions_folder else None
-    subprocess.run(["whisper-ctranslate2", input_dir, "--model", "large-v2", "--language", "en", "--condition_on_previous_text", "False", "--output_dir", output_dir])    
+    subprocess.run(["whisper-ctranslate2", input_dir, "--compute_type int8 --model", "distil-large-v3", "--language", "en", "--condition_on_previous_text", "False", "--output_dir", output_dir])    
     return os.path.dirname(output_dir)
 
 # Function to combine individual transcriptions into a single mass transcription file
@@ -178,7 +179,7 @@ def transcribe_combine(directory):
         track_num = info['track_num']
 
         # Read the contents of the VTT file and write to the output file
-        output_file.write('##' + date + ' - #' + track_num + ' - ' + title + '\n')
+        output_file.write('## ' + date + ' - #' + track_num + ' - ' + title + '\n')
 
         with open(vtt_file, 'r', encoding='utf-8') as f:
             # Skip the first two lines of the VTT file

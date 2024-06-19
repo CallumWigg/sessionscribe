@@ -65,6 +65,14 @@ you can change the other names, but only if you're more competant than me (low b
         - dictionary.txt
 
 ## to do
+- [ ] Rewrite it to be much faster. The text replacement and fixing is currently super slow.
+- [ ] Stop it from double handling text, once it is done it is done. Should export once text correction is done, and then just pull from there, so you're only doing one at a time.
+- [ ] Better multithreading and timestamping of whisperX so that it actually works well
+- [ ] Semantic text work replacement.
+- [ ] Local copy of the mp3s not called and downloaded where not required. Should only be done when converting to m4a, otherwise, just look at the transcripts.
+- [ ] Check the transcripts to see if theres lots of repeated words. If it's a lot, prompt user to retranscribe.
+- [ ] Doesn't need a timestamp range. Just give the first one.
+
 - [ ] All non-standard words should be run through fuzzywuzzy comparing to the enchant standard dict to fix normal word errors
 - [ ] Mass encoding, transcribing, and combination would be neat for users who haven't already done this manually for > 50 sessions. Could use https://github.com/Softcatala/transcribe-service
 - [ ] Basic competency in error management should be employed. Currently, it is _very_ easy to break things.

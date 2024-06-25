@@ -4,3 +4,6 @@ dnd_dictionary.txt
 config.json
 
 *.txt
+keys.py
+__pycache__/html_generator.cpython-310.pyc
+__pycache__/keys.cpython-310.pyc

@@ -748,200 +748,212 @@ def bulk_transcribe_audio(working_directory):
 
     print("Bulk transcription complete.")
 
-# Function to display the interactive menu
-def display_menu():
-    print("\nDnD Session Transcription Menu:")
-    print("1. Transcribe and process new audio file")
-    print("2. Update existing transcriptions (corrections, combining)")
-    print("3. Generate revised transcripts from TSVs")
-    print("4. Retranscribe a single file")
-    print("5. Resummarise a single file")
-    print("6. Generate a new campaign")
-    print("7. Exit")
+def transcribe_and_process():
+    # Transcribe and process new audio file
+    # Search for audio files created in the last 3 days
+    # Print the names of the audio files with corresponding numbers
+    audio_files = search_audio_files()
+    print_options(audio_files)
+    
+    # Prompt the user for input to select a file using the number
+    selected_file = audio_files[get_user_input() - 1]
+
+    # Prompt the user for metadata: Title
+    title = input("Enter the title: ")
+
+    # Run the selected file through the convert_to_m4a function and apply metadata
+    normalised_path = convert_to_m4a(selected_file, title)
+
+    # Transcribe and create revised version
+    campaign_folder, revised_tsv_file = transcribe_and_revise_audio(normalised_path)
+
+    # Combine revised transcriptions
+    md_location = transcribe_combine(campaign_folder)
+
+    generate_summary_and_chapters(revised_tsv_file)
+    combine_summaries_and_chapters(campaign_folder)
+
+    print(f"Combined transcription saved to: {md_location}")
+
+def update_existing_transcriptions():
+    # Update existing revised transcriptions
+    campaigns = [
+        f for f in os.listdir(working_directory) 
+        if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
+    ]
+
+    if not campaigns:
+        print("No campaign folders found in the working directory.")
+    else:
+        print("\nAvailable Campaigns:")
+        for i, campaign in enumerate(campaigns):
+            print(f"{i+1}. {campaign}")
+
+        while True:
+            try:
+                campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
+                if 0 <= campaign_choice < len(campaigns):
+                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    break
+                else:
+                    print("Invalid choice. Please enter a number from the list.")
+            except ValueError:
+                print("Invalid input. Please enter a number.") 
+
+    # Find ALL revised Markdown files
+    revised_md_files = [
+        os.path.join(dirpath, f)
+        for dirpath, dirnames, filenames in os.walk(campaign_folder)
+        for f in filenames
+        if f.endswith("_revised.md")
+    ]
+    if not revised_md_files:
+        print("No revised Markdown files found for update.")
+    else:
+        # Update ALL revised Markdown files
+        for md_file in revised_md_files:
+            print(f'Starting dictionary_update on {md_file}')
+            dictionary_update(md_file)
+            print('Starting fuzzy_fix')
+            fuzzy_fix()
+            print(f'Starting corrections_replace on {md_file}')
+            corrections_replace(md_file)
+            print(f'Done updating {md_file}') 
+
+        # Combine revised transcriptions 
+        md_location = transcribe_combine(campaign_folder)  # Call directly 
+        print(f"Combined transcriptions (text) saved to: {md_location}")
+
+def generate_revised_transcriptions():
+    # Generate revised transcriptions
+    campaigns = [
+        f for f in os.listdir(working_directory) 
+        if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
+    ]
+
+    if not campaigns:
+        print("No campaign folders found in the working directory.")
+    else:
+        print("\nAvailable Campaigns:")
+        for i, campaign in enumerate(campaigns):
+            print(f"{i+1}. {campaign}")
+
+        while True:
+            try:
+                campaign_crehoice = int(input("\nEnter the number of the campaign: ")) - 1
+                if 0 <= campaign_choice < len(campaigns):
+                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    break
+                else:
+                    print("Invalid choice. Please enter a number from the list.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+    generate_revised_transcripts(campaign_folder)
+    combine_summaries_and_chapters(campaign_folder)  # Combine after generating all transcripts
+    print(f"Generated revised transcripts in: {campaign_folder}")
+
+def retranscribe_single_file_wrapper():
+    # Retranscribe single file
+    # Get a list of existing campaign folders (same logic as before) 
+    campaigns = [
+        f for f in os.listdir(working_directory)
+        if os.path.isdir(os.path.join(working_directory, f)) and 
+        any("Audio Files" in d for d in os.listdir(os.path.join(working_directory, f))) 
+    ]
+    if not campaigns:
+        print("No campaign folders found in the working directory.")
+    else:
+        print("\nAvailable Campaigns:")
+        for i, campaign in enumerate(campaigns):
+            print(f"{i+1}. {campaign}")
+
+        while True:
+            try:
+                campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
+                if 0 <= campaign_choice < len(campaigns):
+                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    break
+                else:
+                    print("Invalid choice. Please enter a number from the list.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+    retranscribe_single_file(campaign_folder)
+
+def resummarise_single_file_wrapper():
+    # Resummarise single file
+    # Get a list of existing campaign folders (same logic as before) 
+    campaigns = [
+        f for f in os.listdir(working_directory) 
+        if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
+    ]
+    if not campaigns:
+        print("No campaign folders found in the working directory.")
+    else:
+        print("\nAvailable Campaigns:")
+        for i, campaign in enumerate(campaigns):
+            print(f"{i+1}. {campaign}")
+
+        while True:
+            try:
+                campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
+                if 0 <= campaign_choice < len(campaigns):
+                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    break
+                else:
+                    print("Invalid choice. Please enter a number from the list.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+    resummarise_single_file(campaign_folder)
+
+def generate_new_campaign_wizard():
+    # Option 6: Generate a new campaign
+    campaign_name = input("Enter the name of the new campaign: ")
+    abbreviation = input(f"Enter the abbreviation for '{campaign_name}': ")
+    campaign_folder, audio_files_folder, transcriptions_folder = generate_new_campaign(campaign_name, abbreviation, working_directory)
+    print(f"New campaign '{campaign_name}' created at:")
+    print(f"Campaign Folder: {campaign_folder}")
+    print(f"Audio Files Folder: {audio_files_folder}")
+    print(f"Transcriptions Folder: {transcriptions_folder}")
+
+def bulk_transcribe_audio_wrapper():
+    # Option 7: Bulk normalize audio files in a campaign
+    bulk_transcribe_audio(working_directory)
+
+def bulk_summarise_tsv_files_wrapper():
+    # Option 8: Bulk transcribe audio files in a campaign
+    bulk_summarize_tsv_files(working_directory)
 
 def main():
+    options = [
+        (transcribe_and_process, "Transcribe and process new audio file"),
+        (update_existing_transcriptions, "Update existing transcriptions (corrections, combining)"),
+        (generate_revised_transcriptions, "Generate revised transcripts from TSVs"),
+        (retranscribe_single_file_wrapper, "Retranscribe a single file"),
+        (resummarise_single_file_wrapper, "Resummarise a single file"),
+        (generate_new_campaign_wizard, "Generate a new campaign"),
+        (bulk_transcribe_audio_wrapper, "Bulk transcribe audio"),
+        (lambda: (print("Exiting..."), exit()), "Exit")
+    ]
+
     while True:
-        display_menu()
-        choice = input("\nEnter your choice (1-6): ")
+        # Print out numbered list of commands.
+        print("\nDnD Session Transcription Menu:")
+        for (i, (_, desc)) in enumerate(options, start=1):
+            print(f"{i}. {desc}")
 
-        if choice == '1':       # Transcribe and process new audio file
-            # Search for audio files created in the last 3 days
-            # Print the names of the audio files with corresponding numbers
-            audio_files = search_audio_files()
-            print_options(audio_files)
-            
-            # Prompt the user for input to select a file using the number
-            selected_file = audio_files[get_user_input() - 1]
-
-            # Prompt the user for metadata: Title
-            title = input("Enter the title: ")
-
-            # Run the selected file through the convert_to_m4a function and apply metadata
-            normalised_path = convert_to_m4a(selected_file, title)
-
-            # Transcribe and create revised version
-            campaign_folder, revised_tsv_file = transcribe_and_revise_audio(normalised_path)
-
-            # Combine revised transcriptions
-            md_location = transcribe_combine(campaign_folder)
-
-            generate_summary_and_chapters(revised_tsv_file)
-            combine_summaries_and_chapters(campaign_folder)
-
-            print(f"Combined transcription saved to: {md_location}")
-
-        elif choice == '2':     # Update existing revised transcriptions
-            
-            campaigns = [
-                f for f in os.listdir(working_directory) 
-                if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
-            ]
-
-            if not campaigns:
-                print("No campaign folders found in the working directory.")
-            else:
-                print("\nAvailable Campaigns:")
-                for i, campaign in enumerate(campaigns):
-                    print(f"{i+1}. {campaign}")
-
-                while True:
-                    try:
-                        campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
-                        if 0 <= campaign_choice < len(campaigns):
-                            campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
-                            break
-                        else:
-                            print("Invalid choice. Please enter a number from the list.")
-                    except ValueError:
-                        print("Invalid input. Please enter a number.") 
-
-            # Find ALL revised Markdown files
-            revised_md_files = [
-                os.path.join(dirpath, f)
-                for dirpath, dirnames, filenames in os.walk(campaign_folder)
-                for f in filenames
-                if f.endswith("_revised.md")
-            ]
-            if not revised_md_files:
-                print("No revised Markdown files found for update.")
-            else:
-                # Update ALL revised Markdown files
-                for md_file in revised_md_files:
-                    print(f'Starting dictionary_update on {md_file}')
-                    dictionary_update(md_file)
-                    print('Starting fuzzy_fix')
-                    fuzzy_fix()
-                    print(f'Starting corrections_replace on {md_file}')
-                    corrections_replace(md_file)
-                    print(f'Done updating {md_file}') 
-
-                # Combine revised transcriptions 
-                md_location = transcribe_combine(campaign_folder)  # Call directly 
-                print(f"Combined transcriptions (text) saved to: {md_location}")
-
-        elif choice == '3':     # Generate revised transcriptions
-            
-            campaigns = [
-                f for f in os.listdir(working_directory) 
-                if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
-            ]
-
-            if not campaigns:
-                print("No campaign folders found in the working directory.")
-            else:
-                print("\nAvailable Campaigns:")
-                for i, campaign in enumerate(campaigns):
-                    print(f"{i+1}. {campaign}")
-
-                while True:
-                    try:
-                        campaign_crehoice = int(input("\nEnter the number of the campaign: ")) - 1
-                        if 0 <= campaign_choice < len(campaigns):
-                            campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
-                            break
-                        else:
-                            print("Invalid choice. Please enter a number from the list.")
-                    except ValueError:
-                        print("Invalid input. Please enter a number.")
-            generate_revised_transcripts(campaign_folder)
-            combine_summaries_and_chapters(campaign_folder)  # Combine after generating all transcripts
-            print(f"Generated revised transcripts in: {campaign_folder}")
-
-        elif choice == '4':     # Retranscribe single file
-            # Get a list of existing campaign folders (same logic as before) 
-            campaigns = [
-                f for f in os.listdir(working_directory)
-                if os.path.isdir(os.path.join(working_directory, f)) and 
-                any("Audio Files" in d for d in os.listdir(os.path.join(working_directory, f))) 
-            ]
-            if not campaigns:
-                print("No campaign folders found in the working directory.")
-            else:
-                print("\nAvailable Campaigns:")
-                for i, campaign in enumerate(campaigns):
-                    print(f"{i+1}. {campaign}")
-
-                while True:
-                    try:
-                        campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
-                        if 0 <= campaign_choice < len(campaigns):
-                            campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
-                            break
-                        else:
-                            print("Invalid choice. Please enter a number from the list.")
-                    except ValueError:
-                        print("Invalid input. Please enter a number.")
-            retranscribe_single_file(campaign_folder)
-
-        elif choice == '5':     # Resummarise single file
-            # Get a list of existing campaign folders (same logic as before) 
-            campaigns = [
-                f for f in os.listdir(working_directory) 
-                if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
-            ]
-            if not campaigns:
-                print("No campaign folders found in the working directory.")
-            else:
-                print("\nAvailable Campaigns:")
-                for i, campaign in enumerate(campaigns):
-                    print(f"{i+1}. {campaign}")
-
-                while True:
-                    try:
-                        campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
-                        if 0 <= campaign_choice < len(campaigns):
-                            campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
-                            break
-                        else:
-                            print("Invalid choice. Please enter a number from the list.")
-                    except ValueError:
-                        print("Invalid input. Please enter a number.")
-            resummarise_single_file(campaign_folder)     
-
-        elif choice == '6':
-            # Option 6: Generate a new campaign
-            campaign_name = input("Enter the name of the new campaign: ")
-            abbreviation = input(f"Enter the abbreviation for '{campaign_name}': ")
-            campaign_folder, audio_files_folder, transcriptions_folder = generate_new_campaign(campaign_name, abbreviation, working_directory)
-            print(f"New campaign '{campaign_name}' created at:")
-            print(f"Campaign Folder: {campaign_folder}")
-            print(f"Audio Files Folder: {audio_files_folder}")
-            print(f"Transcriptions Folder: {transcriptions_folder}")
-
-        elif choice == '7':
-            # Option 7: Bulk normalize audio files in a campaign
-            bulk_transcribe_audio(working_directory)
-
-        elif choice == '8':
-            # Option 8: Bulk transcribe audio files in a campaign
-            bulk_summarize_tsv_files(working_directory)
-
-        elif choice == '9':
-            print("Exiting...")
-            break
-
-        else:
+        # Get user to select a command by number.
+        index = -1
+        while True:
+            choice = input("\nEnter your choice (1-6): ")
+            if choice.isnumeric():
+                number = int(choice)
+                if number > 0 and number <= len(options):
+                    index = number - 1
+                    break
             print("Invalid choice. Please try again.")
+        
+        # Run command.
+        options[index][0]()
 
 # Call the main function to start the interactive menu
 if __name__ == "__main__":

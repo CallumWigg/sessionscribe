@@ -20,7 +20,7 @@ import whisperx
 from keys import gemini_key
 genai.configure(api_key=gemini_key)
 
-generation_config = {
+GENAI_GENERATION_CONFIG = {
   "temperature": 1,
   "top_p": 0.95,
   "top_k": 64,
@@ -30,7 +30,7 @@ generation_config = {
 
 model = genai.GenerativeModel(
   model_name="gemini-1.5-flash",
-  generation_config=generation_config,
+  generation_config=GENAI_GENERATION_CONFIG,
   safety_settings={
         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -39,21 +39,53 @@ model = genai.GenerativeModel(
     }
 )
 
-# File locations
-working_directory = "C:\\Users\\callu\\OneDrive - Monash University\\DnD\\Session Recordings"
-dictionary_file = os.path.join(working_directory, "wack_dictionary.txt")
-correction_list_file = os.path.join(working_directory, "corrections.txt")  # Not used anymore 
+def get_working_directory():
+    """Return the base directory all working files are stored in."""
 
-# Load the custom dictionary globally
-with open(dictionary_file, 'r', encoding='utf-8') as f:
-    custom_words = f.read().splitlines()
+    return "C:\\Users\\callu\\OneDrive - Monash University\\DnD\\Session Recordings"
 
-# Create a dictionary of phonetic representations for faster lookup
-phonetic_dict = {metaphone(word): word for word in custom_words}
+def get_corrections_list_file():
+    """Return path of corrections list. Not used any more."""
+    
+    CORRECTIONS_FILE_NAME = "corrections.txt"
 
-# Create a SpellChecker object with the custom dictionary
-spell = SpellChecker()
-spell.word_frequency.load_words(custom_words)  
+    return os.path.join(get_working_directory(), CORRECTIONS_FILE_NAME)
+
+_custom_words = None
+def load_custom_words():
+    """Return a cached list of custom words from the dictionary."""
+
+    DICTIONARY_FILE_NAME = "wack_dictionary.txt"
+
+    if _custom_words != None:
+        return _custom_words
+
+    dictionary_file = os.path.join(get_working_directory(), DICTIONARY_FILE_NAME)
+
+    # Load the custom dictionary and cache in global
+    with open(dictionary_file, "r", encoding="utf-8") as f:
+        _custom_words = f.read().splitlines()
+    return _custom_words
+
+_phonetic_dict = None
+def phonetic_dict():
+    """Return a dictionary of phonetic representations for faster lookup."""
+
+    if _phonetic_dict == None:
+        _phonetic_dict = {
+            metaphone(word): word for word in load_custom_words()
+        }
+    return _phonetic_dict
+
+_spell_checker = None
+def get_spell_checker():
+    """Return spell checker populated with custom word list."""
+
+    if _spell_checker == None:
+        # Create a SpellChecker object with the custom dictionary
+        _spell_checker = SpellChecker()
+        _spell_checker.word_frequency.load_words(load_custom_words())
+    return _spell_checker
 
 # Trawl through working directory and grab the all the audio files in the last 3 days
 def search_audio_files():
@@ -61,7 +93,7 @@ def search_audio_files():
     current_time = datetime.datetime.now()
     three_days_ago = current_time - datetime.timedelta(days=7)
 
-    for root, dirs, files in os.walk(working_directory):
+    for root, dirs, files in os.walk(get_working_directory()):
         for file in files:
             if file.endswith((".wav", ".m4a", ".flac")):
                 file_path = os.path.join(root, file)
@@ -190,7 +222,7 @@ def dictionary_update(md_path):
     with open(md_path, "r", encoding="utf-8") as file:
         text = file.read()
     words = sorted(set(re.findall(r"\b\w+\b", text)))
-    non_dict_words = [word for word in words if not spell.word_frequency[word]]
+    non_dict_words = [word for word in words if not get_spell_checker().word_frequency[word]]
 
     try:
         with open(correction_list_file, "r", encoding="utf-8") as file:
@@ -216,7 +248,7 @@ def fuzzy_fix():
 
     for incorrect in incorrect_words.keys():
         if not incorrect_words[incorrect]:
-            best_match, score = process.extractOne(incorrect, custom_words, scorer=fuzz.ratio)
+            best_match, score = process.extractOne(incorrect, load_custom_words(), scorer=fuzz.ratio)
             if score >= 90:
                 correction = best_match
                 print(f"Correcting {incorrect} -> {correction} ({score}% score)")
@@ -304,14 +336,14 @@ def apply_corrections(text):
     corrected_text = []
     for word in text.split():
         # 1. Check custom dictionary (case-insensitive)
-        if word.lower() in [w.lower() for w in custom_words]:
+        if word.lower() in [w.lower() for w in load_custom_words()]:
             corrected_text.append(word) # Keep original case
             continue
 
         # 2. Phonetic Matching
         phonetic_word = metaphone(word)
-        if phonetic_word in phonetic_dict:
-            corrected_text.append(phonetic_dict[phonetic_word])
+        if phonetic_word in phonetic_dict():
+            corrected_text.append(phonetic_dict()[phonetic_word])
             continue
 
         # 3. If no match, keep the original word
@@ -749,7 +781,8 @@ def bulk_transcribe_audio(working_directory):
     print("Bulk transcription complete.")
 
 def transcribe_and_process():
-    # Transcribe and process new audio file
+    """Menu item; transcribe and process new audio file."""
+    
     # Search for audio files created in the last 3 days
     # Print the names of the audio files with corresponding numbers
     audio_files = search_audio_files()
@@ -776,10 +809,11 @@ def transcribe_and_process():
     print(f"Combined transcription saved to: {md_location}")
 
 def update_existing_transcriptions():
-    # Update existing revised transcriptions
+    """Menu item; update existing revised transcriptions."""
+
     campaigns = [
-        f for f in os.listdir(working_directory) 
-        if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
+        f for f in os.listdir(get_working_directory()) 
+        if os.path.isdir(os.path.join(get_working_directory(), f)) and not f.startswith("x ")
     ]
 
     if not campaigns:
@@ -793,7 +827,7 @@ def update_existing_transcriptions():
             try:
                 campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
                 if 0 <= campaign_choice < len(campaigns):
-                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    campaign_folder = os.path.join(get_working_directory(), campaigns[campaign_choice])
                     break
                 else:
                     print("Invalid choice. Please enter a number from the list.")
@@ -825,10 +859,11 @@ def update_existing_transcriptions():
         print(f"Combined transcriptions (text) saved to: {md_location}")
 
 def generate_revised_transcriptions():
-    # Generate revised transcriptions
+    """Menu item; generate revised transcriptions."""
+
     campaigns = [
-        f for f in os.listdir(working_directory) 
-        if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
+        f for f in os.listdir(get_working_directory()) 
+        if os.path.isdir(os.path.join(get_working_directory(), f)) and not f.startswith("x ")
     ]
 
     if not campaigns:
@@ -842,7 +877,7 @@ def generate_revised_transcriptions():
             try:
                 campaign_crehoice = int(input("\nEnter the number of the campaign: ")) - 1
                 if 0 <= campaign_choice < len(campaigns):
-                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    campaign_folder = os.path.join(get_working_directory(), campaigns[campaign_choice])
                     break
                 else:
                     print("Invalid choice. Please enter a number from the list.")
@@ -853,12 +888,13 @@ def generate_revised_transcriptions():
     print(f"Generated revised transcripts in: {campaign_folder}")
 
 def retranscribe_single_file_wrapper():
-    # Retranscribe single file
+    """Menu item; retranscribe single file."""
+
     # Get a list of existing campaign folders (same logic as before) 
     campaigns = [
-        f for f in os.listdir(working_directory)
-        if os.path.isdir(os.path.join(working_directory, f)) and 
-        any("Audio Files" in d for d in os.listdir(os.path.join(working_directory, f))) 
+        f for f in os.listdir(get_working_directory())
+        if os.path.isdir(os.path.join(get_working_directory(), f)) and 
+        any("Audio Files" in d for d in os.listdir(os.path.join(get_working_directory(), f))) 
     ]
     if not campaigns:
         print("No campaign folders found in the working directory.")
@@ -871,7 +907,7 @@ def retranscribe_single_file_wrapper():
             try:
                 campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
                 if 0 <= campaign_choice < len(campaigns):
-                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    campaign_folder = os.path.join(get_working_directory(), campaigns[campaign_choice])
                     break
                 else:
                     print("Invalid choice. Please enter a number from the list.")
@@ -880,11 +916,12 @@ def retranscribe_single_file_wrapper():
     retranscribe_single_file(campaign_folder)
 
 def resummarise_single_file_wrapper():
-    # Resummarise single file
+    """Menu item; resummarise single file."""
+
     # Get a list of existing campaign folders (same logic as before) 
     campaigns = [
-        f for f in os.listdir(working_directory) 
-        if os.path.isdir(os.path.join(working_directory, f)) and not f.startswith("x ")
+        f for f in os.listdir(get_working_directory()) 
+        if os.path.isdir(os.path.join(get_working_directory(), f)) and not f.startswith("x ")
     ]
     if not campaigns:
         print("No campaign folders found in the working directory.")
@@ -897,7 +934,7 @@ def resummarise_single_file_wrapper():
             try:
                 campaign_choice = int(input("\nEnter the number of the campaign: ")) - 1
                 if 0 <= campaign_choice < len(campaigns):
-                    campaign_folder = os.path.join(working_directory, campaigns[campaign_choice])
+                    campaign_folder = os.path.join(get_working_directory(), campaigns[campaign_choice])
                     break
                 else:
                     print("Invalid choice. Please enter a number from the list.")
@@ -906,22 +943,25 @@ def resummarise_single_file_wrapper():
     resummarise_single_file(campaign_folder)
 
 def generate_new_campaign_wizard():
-    # Option 6: Generate a new campaign
+    """Menu item; generate a new campaign."""
+
     campaign_name = input("Enter the name of the new campaign: ")
     abbreviation = input(f"Enter the abbreviation for '{campaign_name}': ")
-    campaign_folder, audio_files_folder, transcriptions_folder = generate_new_campaign(campaign_name, abbreviation, working_directory)
+    campaign_folder, audio_files_folder, transcriptions_folder = generate_new_campaign(campaign_name, abbreviation, get_working_directory())
     print(f"New campaign '{campaign_name}' created at:")
     print(f"Campaign Folder: {campaign_folder}")
     print(f"Audio Files Folder: {audio_files_folder}")
     print(f"Transcriptions Folder: {transcriptions_folder}")
 
 def bulk_transcribe_audio_wrapper():
-    # Option 7: Bulk normalize audio files in a campaign
-    bulk_transcribe_audio(working_directory)
+    """Menu item; bulk normalize audio files in a campaign."""
+
+    bulk_transcribe_audio(get_working_directory())
 
 def bulk_summarise_tsv_files_wrapper():
-    # Option 8: Bulk transcribe audio files in a campaign
-    bulk_summarize_tsv_files(working_directory)
+    """Menu item; bulk transcribe audio files in a campaign."""
+
+    bulk_summarize_tsv_files(get_working_directory())
 
 def main():
     options = [
@@ -944,7 +984,7 @@ def main():
         # Get user to select a command by number.
         index = -1
         while True:
-            choice = input("\nEnter your choice (1-6): ")
+            choice = input(f"\nEnter your choice (1-{len(options)}): ")
             if choice.isnumeric():
                 number = int(choice)
                 if number > 0 and number <= len(options):

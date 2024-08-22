@@ -48,6 +48,7 @@ joblib==1.4.2
 julius==0.2.7
 kiwisolver==1.4.5
 lazy_loader==0.4
+Levenshtein==0.25.1
 librosa==0.10.2.post1
 lightning==2.4.0
 lightning-utilities==0.11.6
@@ -104,10 +105,12 @@ pyparsing==3.1.2
 pyspellchecker==0.8.1
 pytaglib==3.0.0
 python-dateutil==2.9.0.post0
+python-Levenshtein==0.25.1
 pytorch-lightning==2.4.0
 pytorch-metric-learning==2.6.0
 pytz==2024.1
 PyYAML==6.0.2
+rapidfuzz==3.9.6
 regex==2024.7.24
 requests==2.32.3
 rich==13.7.1

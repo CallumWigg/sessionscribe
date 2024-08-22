@@ -225,19 +225,19 @@ def dictionary_update(md_path):
     non_dict_words = [word for word in words if not get_spell_checker().word_frequency[word]]
 
     try:
-        with open(correction_list_file, "r", encoding="utf-8") as file:
+        with open(get_corrections_list_file(), "r", encoding="utf-8") as file:
             lines = file.readlines()
             corrected_words = {line.split(" -> ")[0] for line in lines if "->" in line}
     except FileNotFoundError:
         corrected_words = set()
 
-    with open(correction_list_file, "a", encoding="utf-8") as file:
+    with open(get_corrections_list_file(), "a", encoding="utf-8") as file:
         for word in sorted(non_dict_words, key=lambda x: x.lower()):
             if word not in corrected_words:
                 file.write(f"{word} -> \n")
 
 def fuzzy_fix():
-    with open(correction_list_file, 'r', encoding='utf-8') as f:
+    with open(get_corrections_list_file(), 'r', encoding='utf-8') as f:
         lines = f.read().splitlines()
 
     incorrect_words = {}
@@ -254,13 +254,13 @@ def fuzzy_fix():
                 print(f"Correcting {incorrect} -> {correction} ({score}% score)")
                 incorrect_words[incorrect] = correction
 
-    with open(correction_list_file, 'w', encoding='utf-8') as f:
+    with open(get_corrections_list_file(), 'w', encoding='utf-8') as f:
         for incorrect, correction in incorrect_words.items():
             f.write(f"{incorrect} -> {correction}\n")
 
 def corrections_replace(file_path):
     replacements = {}
-    with open(correction_list_file, 'r', encoding='utf-8') as f:
+    with open(get_corrections_list_file(), 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if ' -> ' in line:
@@ -782,7 +782,7 @@ def bulk_transcribe_audio(working_directory):
 
 def transcribe_and_process():
     """Menu item; transcribe and process new audio file."""
-    
+
     # Search for audio files created in the last 3 days
     # Print the names of the audio files with corresponding numbers
     audio_files = search_audio_files()

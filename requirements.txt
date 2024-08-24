@@ -1,0 +1,8 @@
+ffmpeg
+faster-whisper
+google-generativeai
+phonetics
+pyspellchecker
+levenshtein
+rapidfuzz
+silero-vad

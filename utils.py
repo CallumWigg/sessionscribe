@@ -1,6 +1,7 @@
 import datetime
 import os
 import json
+from phonetics import metaphone
 
 # Load configuration
 with open('config.json', 'r') as config_file:
@@ -17,10 +18,11 @@ def get_corrections_list_file():
 _custom_words = None
 def load_custom_words():
     """Return a cached list of custom words from the dictionary."""
+    global _custom_words
 
     DICTIONARY_FILE_NAME = "wack_dictionary.txt"
 
-    if _custom_words != None:
+    if _custom_words is not None:
         return _custom_words
 
     dictionary_file = os.path.join(get_working_directory(), DICTIONARY_FILE_NAME)
@@ -28,6 +30,7 @@ def load_custom_words():
     # Load the custom dictionary and cache in global
     with open(dictionary_file, "r", encoding="utf-8") as f:
         _custom_words = f.read().splitlines()
+        
     return _custom_words
 
 _phonetic_dict = None

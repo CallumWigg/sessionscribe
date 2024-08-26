@@ -1,13 +1,13 @@
 import os
-import sys
+import subprocess
 
-# Import functions from modules
-from sessionscribe.audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio
-from sessionscribe.transcription import transcribe_and_revise_audio, bulk_transcribe_audio
-from sessionscribe.text_processing import generate_revised_transcripts, dictionary_update, fuzzy_fix, corrections_replace, transcribe_combine
-from sessionscribe.summarization import generate_summary_and_chapters, collate_summaries
-from sessionscribe.file_management import retranscribe_single_file, resummarise_single_file, generate_new_campaign
-from sessionscribe.user_interaction import print_options, get_user_input, select_campaign_folder
+from audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio
+from transcription import transcribe_and_revise_audio, bulk_transcribe_audio
+from text_processing import generate_revised_transcripts , dictionary_update, fuzzy_fix, corrections_replace, transcribe_combine
+from summarisation import generate_summary_and_chapters, collate_summaries
+from file_management import retranscribe_single_file, resummarise_single_file, generate_new_campaign
+from user_interaction import print_options, get_user_input, select_campaign_folder, find_transcriptions_folder
+from utils import get_working_directory
 
 def transcribe_and_process():
     """Menu item; transcribe and process new audio file."""
@@ -71,7 +71,6 @@ def generate_new_campaign_wizard():
     """Menu item; generate a new campaign."""
     campaign_name = input("Enter the name of the new campaign: ")
     abbreviation = input(f"Enter the abbreviation for '{campaign_name}': ")
-    from .utils import get_working_directory
     campaign_folder, audio_files_folder, transcriptions_folder = generate_new_campaign(campaign_name, abbreviation, get_working_directory())
     print(f"New campaign '{campaign_name}' created at:")
     print(f"Campaign Folder: {campaign_folder}")
@@ -88,10 +87,9 @@ def bulk_transcribe_audio_wrapper():
     campaign_folder = select_campaign_folder()
     bulk_transcribe_audio(campaign_folder)
 
-def bulk_summarize_tsv_files():
+def bulk_summarize_tsv_wrapper():
     """Menu item; bulk summarize existing _revised.txt files in a campaign."""
     campaign_folder = select_campaign_folder()
-    from sessionscribe.file_management import find_transcriptions_folder
     transcriptions_folder = find_transcriptions_folder(campaign_folder)
     if transcriptions_folder:
         for filename in os.listdir(transcriptions_folder):
@@ -104,6 +102,27 @@ def bulk_summarize_tsv_files():
         print(f"No 'Transcriptions' folder found in {campaign_folder}")
 
 def main():
+    working_directory = get_working_directory()
+    dictionary_path = os.path.join(working_directory, "wack_dictionary.txt")
+
+    if not os.path.exists(dictionary_path):
+        print("wack_dictionary.txt not found, creating it...")
+        with open(dictionary_path, "w", encoding="utf-8") as f:
+            f.write("Flumph\n")
+            f.write("Githyanki\n")
+            f.write("Modron\n")
+            f.write("Slaad\n")
+            f.write("Umberhulk\n")
+            f.write("Yuan-ti\n")
+
+        # Prompt user to open the dictionary file
+        if input("Would you like to open wack_dictionary.txt in a text editor? (y/n): ").lower() == 'y':
+            try:
+                # Attempt to open the file using the default text editor
+                os.startfile(dictionary_path)  # For Windows
+            except AttributeError:
+                # For macOS and Linux, use the 'open' command
+                subprocess.call(['open', dictionary_path])
     options = [
         (transcribe_and_process, "Transcribe and process new audio file"),
         (update_existing_transcriptions, "Update existing transcriptions (corrections, combining)"),
@@ -113,7 +132,7 @@ def main():
         (generate_new_campaign_wizard, "Generate a new campaign"),
         (bulk_normalise_audio_wrapper, "Bulk normalise audio files"),
         (bulk_transcribe_audio_wrapper, "Bulk transcribe audio"),
-        (bulk_summarize_tsv_files, "Bulk summarise files"),
+        (bulk_summarize_tsv_wrapper, "Bulk summarise files"),
         (lambda: (print("Exiting..."), exit()), "Exit")
     ]
 

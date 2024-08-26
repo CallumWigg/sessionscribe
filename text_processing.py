@@ -1,9 +1,17 @@
-import re
+import datetime
 import os
-from spellchecker import SpellChecker
-from phonetics import metaphone
+import re
+import csv
 
-from .utils import config, get_corrections_list_file, load_custom_words, phonetic_dict
+import ffmpeg
+from phonetics import metaphone
+from rapidfuzz import fuzz, process
+from spellchecker import SpellChecker
+
+from summarisation import collate_summaries
+from utils import (config, format_time, get_corrections_list_file,
+                   load_custom_words, phonetic_dict, get_working_directory)
+
 
 def apply_corrections(text):
     """Apply corrections to the given text."""
@@ -22,20 +30,13 @@ def apply_corrections(text):
 
     return " ".join(corrected_text)
 
-
 def apply_corrections_and_formatting(input_tsv, output_txt):
     """Apply corrections and formatting to the transcribed text."""
+    from file_management import find_audio_files_folder, find_transcriptions_folder
     tsv_dir = os.path.dirname(input_tsv)
     parent_dir = os.path.dirname(tsv_dir)  # (Campaign Folder)
 
-    transcriptions_folder = next(
-        (folder for folder in os.listdir(parent_dir)
-         if os.path.isdir(os.path.join(parent_dir, folder)) and "Transcriptions" in folder),
-        None
-    )
-    abbreviation = transcriptions_folder.split()[0] if transcriptions_folder else ""
-
-    audio_files_folder = os.path.join(parent_dir, f"{abbreviation} Audio Files")
+    audio_files_folder = find_audio_files_folder(parent_dir)
 
     if not os.path.exists(audio_files_folder):
         print(f"Warning: Could not find 'Audio Files' folder: {audio_files_folder}")
@@ -56,7 +57,7 @@ def apply_corrections_and_formatting(input_tsv, output_txt):
     with open(input_tsv, 'r', encoding='utf-8', newline='') as f_in, \
             open(output_txt, 'w', encoding='utf-8') as f_out:
 
-        date_obj = datetime.strptime(date_str, '%Y_%m_%d')
+        date_obj = datetime.datetime.strptime(date_str, '%Y_%m_%d')
         formatted_date = date_obj.strftime('%d / %m / %Y')  # Format date
         f_out.write(f"{title} - #{track_num} - {formatted_date}\n\n")
 
@@ -144,3 +145,60 @@ def get_spell_checker():
 
 
 _spell_checker = None # Initialize the global variable
+
+def transcribe_combine(directory):
+    """Combine individual revised transcriptions into a single text file."""
+    txt_files = [os.path.join(root, file)
+                for root, _, files in os.walk(directory)
+                for file in files if file.endswith("_revised.txt")]
+
+    # Sort by track number in descending order (highest first)
+    def get_sort_key(file_path):
+        match = re.search(r'#(\d+) - (\d{4}_\d{2}_\d{2})', file_path) # Capture date as well
+        if match:
+            track_number = int(match.group(1))
+            date_str = match.group(2)
+            date_int = int(date_str.replace("_", ""))
+            return track_number, date_int  # Sort by track number descending, then date ascending
+        else:
+            return 0, 0  # Handle cases without a track number 
+
+    txt_files.sort(key=get_sort_key)
+    txt_files.reverse() # Reverse the list after sorting!
+
+    campaign = os.path.basename(directory)
+    output_file_name = os.path.join(directory, f"{campaign} - Transcriptions.txt")
+
+    with open(output_file_name, 'w', encoding='utf-8') as output_file:
+        output_file.write(f"# {campaign}\n\n")
+        output_file.write(f"Sessions: {len(txt_files)}\n\n")
+
+        # Write track summary
+        for txt_file in txt_files:
+            with open(txt_file, 'r', encoding='utf-8') as f:
+                first_line = f.readline().strip()  # Read the first line
+                match = re.search(r'^(.*) - #(\d+) - (\d{4}_\d{2}_\d{2})$', first_line)
+                if match:
+                    title, track_number, date_str = match.groups()
+                    date_str = date_str.replace("_", "/")  # Format date as DD/MM/YYYY
+                    output_file.write(f"{date_str} - #{track_number} - {title}\n")
+
+        output_file.write("\n") # Add extra newline before session content
+
+        # Write session content
+        for txt_file in txt_files:
+            with open(txt_file, 'r', encoding='utf-8') as f:
+                # Read and write the entire content, including the modified first line
+                output_file.write(f.read())
+                output_file.write('\n')  # Add a separator between sessions
+
+def generate_revised_transcripts(directory):
+    """Generate revised transcripts for existing TSVs in the specified directory."""
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith(".tsv"):
+                tsv_file = os.path.join(root, file)
+                revised_tsv_file = tsv_file.replace(".tsv", "_revised.txt")
+                apply_corrections_and_formatting(tsv_file, revised_tsv_file)
+
+    collate_summaries(directory)  # Combine after generating all transcripts

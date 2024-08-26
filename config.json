@@ -10,7 +10,7 @@
     "device": "auto",
       "device_options": ["cpu", "cuda", "auto"],
     "compute": "auto",
-      "compute_options": ["default,auto,int8,int8_float16,int8_bfloat16,int8_float32,int16,float16,float32,bfloat16"],
+      "compute_options": ["default,auto,int8,int8_float16,int8_bfloat16,int8_float32,int16,float16,float32,bfloat16"]
   },
   "gemini": {
     "api_key": "GEMINI_API_KEY",
@@ -22,6 +22,8 @@
   },
   "podcasts": {
     "artist_name": "PODCAST_NAME_HERE",
-    "genre": "Podcast"
+    "genre": "Podcast",
+    "audio_channels": 2,
+    "samping_rate": 44100
   }
 }

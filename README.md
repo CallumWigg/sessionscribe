@@ -13,6 +13,8 @@ i've written this to manage the session recordings of for my (private) D&D podca
 ## Usage
 ```pip install -r requirements.txt```
 
+```install``` [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+
 ```make changes to the config.json```
 
 ```python sessionscribe.py```
@@ -60,12 +62,14 @@ oh god the list keeps growing faster than i can tick them off
 - [ ] check if wack_dictionaries exists, otherwise make it
 - [ ] investigate [this](https://github.com/zh-plus/openlrc) for better dictionary words
 - [ ] fix fuzzy stuff, currently it's only using fuzzy and phoenetic is just sitting there doing nothing.
-- [ ] implement a way to automatically
-    - [ ] upload to wiki like fandom
-    - [ ] upload to podcast/rss service
+- [ ] helper functions for all the file locations
+- [ ] get batch functions to work properly.
 
 
 ### deep future to do pipe dream never going to happen
+- [ ] implement a way to automatically
+    - [ ] upload to wiki like fandom
+    - [ ] upload to podcast/rss service
 - [ ] transcript saved in a html that users can access? search better, seperate page for summaries? data, etc.
 - [ ] [semantic search](https://github.com/arunsupe/semantic-grep), i tried this but its super slow. is there a way to cache it all after loading once? cause currently it takes ages to cache the model.
 - [ ] implement GUI for it all, which will allow you to correctly set up folder structure, locations (and save them to the info file)

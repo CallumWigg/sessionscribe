@@ -1,8 +1,14 @@
+import csv
+from datetime import datetime
 import re
 import os
-from spellchecker import SpellChecker
-from phonetics import metaphone
 
+import ffmpeg
+from fuzzywuzzy import fuzz, process
+from phonetics import metaphone
+from spellchecker import SpellChecker
+
+from . import utils
 from .utils import config, get_corrections_list_file, load_custom_words, phonetic_dict
 
 def apply_corrections(text):
@@ -66,7 +72,7 @@ def apply_corrections_and_formatting(input_tsv, output_txt):
         for row in tsv_reader:
             if len(row) == 3:
                 start_time, _, caption = row  # Unpack the row
-                start_time = format_time(start_time)
+                start_time = utils.format_time(start_time)
                 f_out.write(f"{start_time}   |   {caption}\n")
             else:
                 print(f"Warning: Skipping row with incorrect format in {input_tsv}: {row}")
@@ -133,8 +139,10 @@ def fuzzy_fix():
         for incorrect, correction in incorrect_words.items():
             f.write(f"{incorrect} -> {correction}\n")
 
+_spell_checker = None # Initialize the global variable
 def get_spell_checker():
     """Return spell checker populated with custom word list."""
+
     global _spell_checker 
     if _spell_checker is None:
         # Create a SpellChecker object with the custom dictionary
@@ -142,5 +150,3 @@ def get_spell_checker():
         _spell_checker.word_frequency.load_words(load_custom_words())
     return _spell_checker
 
-
-_spell_checker = None # Initialize the global variable

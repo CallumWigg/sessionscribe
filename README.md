@@ -15,7 +15,7 @@ i've written this to manage the session recordings of for my (private) D&D podca
 
 ```make changes to the config.json```
 
-```python sessionscribe.py```
+```python -m sessionscribe```
 
 ## current feature set:
 

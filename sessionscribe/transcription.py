@@ -1,8 +1,6 @@
 import os
 import csv
-import whisper
 from faster_whisper import WhisperModel
-from whisper.utils import get_writer
 
 from .utils import config, format_time
 from .text_processing import apply_corrections_and_formatting

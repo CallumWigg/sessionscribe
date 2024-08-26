@@ -1,19 +1,23 @@
 import os
-import sys
 
 # Import functions from modules
-from sessionscribe.audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio
-from sessionscribe.transcription import transcribe_and_revise_audio, bulk_transcribe_audio
-from sessionscribe.text_processing import generate_revised_transcripts, dictionary_update, fuzzy_fix, corrections_replace, transcribe_combine
-from sessionscribe.summarization import generate_summary_and_chapters, collate_summaries
-from sessionscribe.file_management import retranscribe_single_file, resummarise_single_file, generate_new_campaign
-from sessionscribe.user_interaction import print_options, get_user_input, select_campaign_folder
+from .audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio
+from .transcription import transcribe_and_revise_audio, bulk_transcribe_audio
+from .text_processing import generate_revised_transcripts, dictionary_update, fuzzy_fix, corrections_replace, transcribe_combine
+from .summarisation import generate_summary_and_chapters, collate_summaries
+from .file_management import retranscribe_single_file, resummarise_single_file, generate_new_campaign
+
+from . import file_management
+from . import user_interaction
 
 def transcribe_and_process():
     """Menu item; transcribe and process new audio file."""
+
     audio_files = search_audio_files() # Search for audio files created in the last 3 days
-    print_options(audio_files) # Print the names of the audio files with corresponding numbers
-    selected_file = audio_files[get_user_input() - 1] # Prompt the user for input to select a file using the number
+    selected_file = user_interaction.choose_from_list(
+        audio_files, None, "Enter the number of the file you want to process"
+    )
+  
     title = input("Enter the title: ") # Prompt the user for metadata: Title    
     normalised_path = convert_to_m4a(selected_file, title) # Run the selected file through the convert_to_m4a function and apply metadata
     campaign_folder, revised_tsv_file = transcribe_and_revise_audio(normalised_path) # Transcribe and create revised version
@@ -24,7 +28,8 @@ def transcribe_and_process():
 
 def update_existing_transcriptions():
     """Menu item; update existing revised transcriptions."""
-    campaign_folder = select_campaign_folder()
+
+    campaign_folder = user_interaction.select_campaign_folder()
     revised_txt_files = [
         os.path.join(dirpath, f)
         for dirpath, dirnames, filenames in os.walk(campaign_folder)
@@ -52,19 +57,19 @@ def update_existing_transcriptions():
 
 def generate_revised_transcriptions():
     """Menu item; generate revised transcriptions."""
-    campaign_folder = select_campaign_folder()
+    campaign_folder = user_interaction.select_campaign_folder()
     generate_revised_transcripts(campaign_folder)
     collate_summaries(campaign_folder)
     print(f"Generated revised transcripts in: {campaign_folder}")
 
 def retranscribe_single_file_wrapper():
     """Menu item; retranscribe single file."""
-    campaign_folder = select_campaign_folder()
+    campaign_folder = user_interaction.select_campaign_folder()
     retranscribe_single_file(campaign_folder)
 
 def resummarise_single_file_wrapper():
     """Menu item; resummarise single file."""
-    campaign_folder = select_campaign_folder()
+    campaign_folder = user_interaction.select_campaign_folder()
     resummarise_single_file(campaign_folder)
 
 def generate_new_campaign_wizard():
@@ -80,19 +85,19 @@ def generate_new_campaign_wizard():
 
 def bulk_normalise_audio_wrapper():
     """Menu item; bulk normalise audio files in a campaign."""
-    campaign_folder = select_campaign_folder()
+    campaign_folder = user_interaction.select_campaign_folder()
     bulk_normalize_audio(campaign_folder)
 
 def bulk_transcribe_audio_wrapper():
     """Menu item; bulk transcribe audio files in a campaign."""
-    campaign_folder = select_campaign_folder()
+    campaign_folder = user_interaction.select_campaign_folder()
     bulk_transcribe_audio(campaign_folder)
 
 def bulk_summarize_tsv_files():
     """Menu item; bulk summarize existing _revised.txt files in a campaign."""
-    campaign_folder = select_campaign_folder()
-    from sessionscribe.file_management import find_transcriptions_folder
-    transcriptions_folder = find_transcriptions_folder(campaign_folder)
+    campaign_folder = user_interaction.select_campaign_folder()
+
+    transcriptions_folder = file_management.find_transcriptions_folder(campaign_folder)
     if transcriptions_folder:
         for filename in os.listdir(transcriptions_folder):
             if filename.endswith("_revised.txt"):
@@ -117,25 +122,17 @@ def main():
         (lambda: (print("Exiting..."), exit()), "Exit")
     ]
 
-    while True:
-        # Print out numbered list of commands.
-        print("\nDnD Session Transcription Menu:")
-        for (i, (_, desc)) in enumerate(options, start=1):
-            print(f"{i}. {desc}")
+    labels = [option[1] for option in options]
+    callbacks = [option[0] for option in options]
 
-        # Get user to select a command by number.
-        index = -1
-        while True:
-            choice = input(f"\nEnter your choice (1-{len(options)}): ")
-            if choice.isnumeric():
-                number = int(choice)
-                if number > 0 and number <= len(options):
-                    index = number - 1
-                    break
-            print("Invalid choice. Please try again.")
-        
-        # Run command.
-        options[index][0]()
+    while True:
+        callback = user_interaction.choose_from_list(
+            labels,
+            "DnD Session Transcription Menu",
+            f"Enter your choice (1-{len(options)})",
+            values=callbacks
+        )
+        callback()
 
 # Call the main function to start the interactive menu
 if __name__ == "__main__":

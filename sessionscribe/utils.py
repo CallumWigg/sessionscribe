@@ -1,6 +1,7 @@
-import datetime
 import os
 import json
+from phonetics import metaphone
+
 from phonetics import metaphone
 
 # Load configuration
@@ -18,10 +19,10 @@ def get_corrections_list_file():
 _custom_words = None
 def load_custom_words():
     """Return a cached list of custom words from the dictionary."""
-    global _custom_words
 
     DICTIONARY_FILE_NAME = "wack_dictionary.txt"
 
+    global _custom_words
     if _custom_words is not None:
         return _custom_words
 
@@ -37,6 +38,7 @@ _phonetic_dict = None
 def phonetic_dict():
     """Return a dictionary of phonetic representations for faster lookup."""
 
+    global _phonetic_dict
     if _phonetic_dict == None:
         _phonetic_dict = {
             metaphone(word): word for word in load_custom_words()

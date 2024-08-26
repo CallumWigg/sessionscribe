@@ -8,9 +8,15 @@
     "model": "faster-distil-medium.en",
     "language": "en",
     "device": "auto",
-      "device_options": ["cpu", "cuda", "auto"],
+    "device_options": [
+      "cpu",
+      "cuda",
+      "auto"
+    ],
     "compute": "auto",
-      "compute_options": ["default,auto,int8,int8_float16,int8_bfloat16,int8_float32,int16,float16,float32,bfloat16"]
+    "compute_options": [
+      "default,auto,int8,int8_float16,int8_bfloat16,int8_float32,int16,float16,float32,bfloat16"
+    ]
   },
   "gemini": {
     "api_key": "GEMINI_API_KEY",

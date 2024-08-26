@@ -1,12 +1,14 @@
 import os
 import re
 
-from summarisation import collate_summaries, generate_summary_and_chapters
-from transcription import transcribe_and_revise_audio
+from .summarisation import collate_summaries, generate_summary_and_chapters
+from .transcription import transcribe_and_revise_audio
 
+from . import user_interaction
 
 def find_audio_files_folder(campaign_folder):
     """Find a folder within the campaign folder that contains 'Audio Files' in its name."""
+
     audio_folders = [
         folder for folder in os.listdir(campaign_folder)
         if os.path.isdir(os.path.join(campaign_folder, folder)) and "Audio Files" in folder
@@ -16,22 +18,17 @@ def find_audio_files_folder(campaign_folder):
     elif len(audio_folders) == 1:
         return os.path.join(campaign_folder, audio_folders[0])
     else:
-        print("Multiple folders with 'Audio Files' found. Please select one:")
-        for i, folder in enumerate(audio_folders):
-            print(f"{i + 1}. {folder}")
-        try:
-            choice = int(input("\nEnter the number of the folder: ")) - 1
-            if 0 <= choice < len(audio_folders):
-                return os.path.join(campaign_folder, audio_folders[choice])
-            else:
-                print("Invalid choice. Using the first folder.")
-                return os.path.join(campaign_folder, audio_folders[0])
-        except ValueError:
-            print("Invalid input. Using the first folder.")
-            return os.path.join(campaign_folder, audio_folders[0])
+        folder = user_interaction.choose_from_list(
+            audio_folders,
+            "Multiple folders with 'Audio Files' found. Please select one",
+            "Enter the number of the folder",
+            default=audio_folders[0]
+        )
+        return os.path.join(campaign_folder, folder)
 
 def find_transcriptions_folder(campaign_folder):
     """Find a folder within the campaign folder that contains 'Transcriptions' in its name."""
+    
     transcriptions_folders = [
         folder for folder in os.listdir(campaign_folder)
         if os.path.isdir(os.path.join(campaign_folder, folder)) and "Transcriptions" in folder
@@ -41,19 +38,13 @@ def find_transcriptions_folder(campaign_folder):
     elif len(transcriptions_folders) == 1:
         return os.path.join(campaign_folder, transcriptions_folders[0])
     else:
-        print("Multiple folders with 'Transcriptions' found. Please select one:")
-        for i, folder in enumerate(transcriptions_folders):
-            print(f"{i + 1}. {folder}")
-        try:
-            choice = int(input("\nEnter the number of the folder: ")) - 1
-            if 0 <= choice < len(transcriptions_folders):
-                return os.path.join(campaign_folder, transcriptions_folders[choice])
-            else:
-                print("Invalid choice. Using the first folder.")
-                return os.path.join(campaign_folder, transcriptions_folders[0])
-        except ValueError:
-            print("Invalid input. Using the first folder.")
-            return os.path.join(campaign_folder, transcriptions_folders[0])
+        folder = user_interaction.choose_from_list(
+            transcriptions_folders,
+            "Multiple folders with 'Transcriptions' found. Please select one",
+            "Enter the number of the folder",
+            default=transcriptions_folders[0]
+        )
+        return os.path.join(campaign_folder, folder)
 
 def generate_new_campaign(campaign_name, abbreviation, base_directory):
     """Generates a new campaign directory structure."""

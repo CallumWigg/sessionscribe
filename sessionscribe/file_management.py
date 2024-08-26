@@ -1,8 +1,8 @@
 import os
 import re
 
-from summarisation import collate_summaries, generate_summary_and_chapters
-from transcription import transcribe_and_revise_audio
+from .summarisation import collate_summaries, generate_summary_and_chapters
+from .transcription import transcribe_and_revise_audio
 
 from . import user_interaction
 

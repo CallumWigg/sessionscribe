@@ -4,12 +4,13 @@ import json
 import math
 import os
 
-from utils import get_working_directory
-from file_management import find_audio_files_folder
 from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.flac import FLAC
 from mutagen.wave import WAVE
+
+from .utils import get_working_directory
+from .file_management import find_audio_files_folder
 
 # Load configuration
 with open('config.json', 'r') as config_file:

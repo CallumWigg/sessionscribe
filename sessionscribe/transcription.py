@@ -1,7 +1,6 @@
 import csv
 import os
-
-from faster_whisper import WhisperModel  # , BatchedInferencePipeline
+from faster_whisper import WhisperModel
 
 from text_processing import apply_corrections_and_formatting
 from utils import config, load_custom_words

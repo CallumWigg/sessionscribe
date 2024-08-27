@@ -2,8 +2,8 @@ import csv
 import os
 from faster_whisper import WhisperModel
 
-from text_processing import apply_corrections_and_formatting
-from utils import config, load_custom_words
+from .text_processing import apply_corrections_and_formatting
+from .utils import config, load_custom_words
 
 os.environ['KMP_DUPLICATE_LIB_OK']='True' #its not working without this for some reason
 
@@ -46,7 +46,7 @@ def transcribe_and_revise_audio(input_audio_file):
 
 def bulk_transcribe_audio(campaign_folder):
     """Transcribes audio files in a specified campaign folder."""
-    from file_management import find_audio_files_folder
+    from .file_management import find_audio_files_folder
     audio_files_folder = find_audio_files_folder(campaign_folder)
     if audio_files_folder:
         for filename in os.listdir(audio_files_folder):

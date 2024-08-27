@@ -5,6 +5,7 @@ from .summarisation import collate_summaries, generate_summary_and_chapters
 from .transcription import transcribe_and_revise_audio
 
 from . import user_interaction
+from .utils import get_working_directory
 
 def find_audio_files_folder(campaign_folder):
     """Find a folder within the campaign folder that contains 'Audio Files' in its name."""
@@ -28,7 +29,7 @@ def find_audio_files_folder(campaign_folder):
 
 def find_transcriptions_folder(campaign_folder):
     """Find a folder within the campaign folder that contains 'Transcriptions' in its name."""
-    
+    campaign_folder = os.path.join(get_working_directory(), campaign_folder) 
     transcriptions_folders = [
         folder for folder in os.listdir(campaign_folder)
         if os.path.isdir(os.path.join(campaign_folder, folder)) and "Transcriptions" in folder

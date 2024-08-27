@@ -3,30 +3,15 @@ import re
 from datetime import datetime
 
 import google.generativeai as genai
-from google.generativeai.types import HarmBlockThreshold, HarmCategory
+from google.generativeai.types import HarmBlockThreshold, HarmCategory, GenerationConfig
 
-from utils import config, format_time
+from .utils import config, format_time
 
 # Gemini Configuration
 genai.configure(api_key=config["gemini"]["api_key"])
 
-GENAI_GENERATION_CONFIG = {
-  "temperature": config["gemini"]["temperature"],
-  "top_p": 0.95,
-  "top_k": 64,
-  "max_output_tokens": 1000,
-  "response_mime_type": "text/plain",
-}
-
 model = genai.GenerativeModel(
-  model_name=config["gemini"]["model_name"],
-  generation_config=GENAI_GENERATION_CONFIG,
-  safety_settings={
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE, 
-        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,        
-    }
+  model_name=config["gemini"]["model_name"]
 )
 
 def generate_summary_and_chapters(transcript_path):
@@ -65,10 +50,24 @@ def generate_summary_and_chapters(transcript_path):
             if file_summary.state.name != "ACTIVE":
                 raise Exception(f"File {file_summary.name} failed to process")
 
-            # Set the temperature for the model
-            model.generation_config["temperature"] = temperature
 
-            summary_response = model.generate_content([file_summary, "Generate a short 200-word summary of this dungeons and dragons session transcript. Write as a synopsis of the events, assuming the reader understands the context of the campaign."])
+            content_config = GenerationConfig(
+                max_output_tokens=300,
+                temperature=temperature
+            )
+
+            safety_settings = {
+                HarmCategory.HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
+            }
+
+            summary_response = model.generate_content(
+                [file_summary, "Generate a short 200-word summary of this dungeons and dragons session transcript. Write as a synopsis of the events, assuming the reader understands the context of the campaign."],
+                generation_config=content_config,
+                safety_settings=safety_settings,
+            )
 
             if summary_response.is_blocked:
                 raise Exception("Summary generation blocked by safety filter.")
@@ -77,7 +76,7 @@ def generate_summary_and_chapters(transcript_path):
             break  # Exit the retry loop if successful
         except Exception as e:
             print(f"Attempt {attempt + 1} failed: {e}")
-            temperature -= 0.1  # Reduce temperature for the next attempt
+            temperature += 0.2  # Reduce temperature for the next attempt
             if attempt < max_retries - 1:
                 print(f"Retrying with temperature: {temperature}")
             else:
@@ -112,6 +111,10 @@ def generate_summary_and_chapters(transcript_path):
     """
 
     temperature = config["gemini"]["temperature"]  # Reset temperature for chapters
+    temp_chapters_file = transcript_path.replace("_revised.txt", "_temp_chapters.txt")
+    with open(temp_chapters_file, "w", encoding="utf-8") as temp_f:
+        temp_f.write(transcript_text)
+
     for attempt in range(max_retries):
         try:
             file_chapters = genai.upload_file(temp_chapters_file, mime_type="text/plain", display_name=os.path.basename(transcript_path).replace("_revised.txt", "_chapters.txt"))
@@ -124,7 +127,23 @@ def generate_summary_and_chapters(transcript_path):
             # Set the temperature for the model
             model.generation_config["temperature"] = temperature
 
-            chapters_response = model.generate_content([file_chapters, prompt_text])
+            content_config = GenerationConfig(
+                max_output_tokens=300,
+                temperature=temperature
+            )
+
+            safety_settings = {
+                HarmCategory.HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
+            }
+
+            chapters_response = model.generate_content(
+                [file_chapters, chapters_prompt_text],
+                generation_config=content_config,
+                safety_settings=safety_settings,
+            )
 
             if chapters_response.is_blocked:
                 raise Exception("Chapters generation blocked by safety filter.")
@@ -133,7 +152,7 @@ def generate_summary_and_chapters(transcript_path):
             break  # Exit the retry loop if successful
         except Exception as e:
             print(f"Attempt {attempt + 1} failed: {e}")
-            temperature -= 0.1  # Reduce temperature for the next attempt
+            temperature += 0.2  # Reduce temperature for the next attempt
             if attempt < max_retries - 1:
                 print(f"Retrying with temperature: {temperature}")
             else:
@@ -158,7 +177,23 @@ def generate_summary_and_chapters(transcript_path):
         subtitle_temp = 0.5*config["gemini"]["temperature"]
         model.generation_config["temperature"] = subtitle_temp
 
-        subtitle_response = model.generate_content([file_chapters, "Generate a very short and concise, ~50 character podcast subtitle that captures the main plot points or advancements that occurred in this Dungeons and Dragons session. Avoid using character names."])
+        content_config = GenerationConfig(
+            max_output_tokens=50,
+            temperature=subtitle_temp
+        )
+
+        safety_settings = {
+            HarmCategory.HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
+        }
+
+        subtitle_response = model.generate_content(
+            [file_summary, "Generate a very short and concise, ~50 character podcast subtitle that captures the main plot points or advancements that occurred in this Dungeons and Dragons session. Avoid using character names."],
+            generation_config=content_config,
+            safety_settings=safety_settings,
+        )
 
         if subtitle_response.is_blocked:
             raise Exception("Subtitle generation blocked by safety filter.")

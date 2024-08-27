@@ -8,7 +8,7 @@ from phonetics import metaphone
 from rapidfuzz import fuzz, process
 from spellchecker import SpellChecker
 
-from summarisation import collate_summaries
+from .summarisation import collate_summaries
 from . import utils
 
 def apply_corrections(text):

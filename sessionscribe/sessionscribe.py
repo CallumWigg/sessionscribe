@@ -4,9 +4,9 @@ import subprocess
 # Import functions from modules
 from .audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio
 from .transcription import transcribe_and_revise_audio, bulk_transcribe_audio
-from .text_processing import generate_revised_transcripts, dictionary_update, fuzzy_fix, corrections_replace, transcribe_combine
+from .text_processing import dictionary_update, fuzzy_fix, corrections_replace
 from .summarisation import generate_summary_and_chapters, collate_summaries
-from .file_management import retranscribe_single_file, resummarise_single_file, generate_new_campaign
+from .file_management import retranscribe_single_file, resummarise_single_file, generate_new_campaign, transcribe_combine
 
 from . import file_management
 from . import user_interaction

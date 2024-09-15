@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 
 import google.generativeai as genai
-from google.generativeai.types import HarmBlockThreshold, HarmCategory, GenerationConfig
+from google.generativeai.types import HarmBlockThreshold, HarmCategory, GenerationConfig, SafetySettingDict
 
 from .utils import config, format_time
 
@@ -13,6 +13,25 @@ genai.configure(api_key=config["gemini"]["api_key"])
 model = genai.GenerativeModel(
   model_name=config["gemini"]["model_name"]
 )
+
+safety_config = [
+    SafetySettingDict(
+        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold=HarmBlockThreshold.BLOCK_NONE,
+    ),
+    SafetySettingDict(
+        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold=HarmBlockThreshold.BLOCK_NONE,
+    ),
+    SafetySettingDict(
+        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        threshold=HarmBlockThreshold.BLOCK_NONE,
+    ),
+    SafetySettingDict(
+        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        threshold=HarmBlockThreshold.BLOCK_NONE,
+    ),
+]
 
 def generate_summary_and_chapters(transcript_path):
     """Generates a summary and timestamped chapters using the Gemini API."""
@@ -50,23 +69,15 @@ def generate_summary_and_chapters(transcript_path):
             if file_summary.state.name != "ACTIVE":
                 raise Exception(f"File {file_summary.name} failed to process")
 
-
             content_config = GenerationConfig(
                 max_output_tokens=300,
                 temperature=temperature
             )
 
-            safety_settings = {
-                HarmCategory.HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
-            }
-
             summary_response = model.generate_content(
                 [file_summary, "Generate a short 200-word summary of this dungeons and dragons session transcript. Write as a synopsis of the events, assuming the reader understands the context of the campaign."],
                 generation_config=content_config,
-                safety_settings=safety_settings,
+                safety_settings=safety_config,
             )
 
             if summary_response.is_blocked:
@@ -132,17 +143,10 @@ def generate_summary_and_chapters(transcript_path):
                 temperature=temperature
             )
 
-            safety_settings = {
-                HarmCategory.HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
-            }
-
             chapters_response = model.generate_content(
                 [file_chapters, chapters_prompt_text],
                 generation_config=content_config,
-                safety_settings=safety_settings,
+                safety_settings=safety_config,
             )
 
             if chapters_response.is_blocked:
@@ -182,17 +186,10 @@ def generate_summary_and_chapters(transcript_path):
             temperature=subtitle_temp
         )
 
-        safety_settings = {
-            HarmCategory.HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
-        }
-
         subtitle_response = model.generate_content(
             [file_summary, "Generate a very short and concise, ~50 character podcast subtitle that captures the main plot points or advancements that occurred in this Dungeons and Dragons session. Avoid using character names."],
             generation_config=content_config,
-            safety_settings=safety_settings,
+            safety_settings=safety_config,
         )
 
         if subtitle_response.is_blocked:

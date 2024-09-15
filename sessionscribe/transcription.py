@@ -5,7 +5,7 @@ from faster_whisper import WhisperModel
 from .text_processing import apply_corrections_and_formatting
 from .utils import config, load_custom_words
 
-os.environ['KMP_DUPLICATE_LIB_OK']='True' #its not working without this for some reason
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 def transcribe_and_revise_audio(input_audio_file):
     """Transcribe and revise audio using faster-whisper."""
@@ -21,8 +21,7 @@ def transcribe_and_revise_audio(input_audio_file):
         input_audio_file,
         language=config["transcription"]["language"],
         condition_on_previous_text = False,
-        vad_filter = True,
-        repetition_penalty = 1.2,
+        repetition_penalty = 1.1,
         hotwords = hotwords_str,
     )
 

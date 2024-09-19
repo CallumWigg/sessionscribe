@@ -55,12 +55,19 @@ def process_gemini_response(response):
 
     if response.candidates:
         candidate = response.candidates[0]
-        if candidate.finish_reason == FinishReason.SAFETY:
+        if candidate.finish_reason == 'SAFETY':
             safety_issues = [rating.category.name for rating in candidate.safety_ratings if rating.severity >= HarmSeverity.SEVERITY_MEDIUM]
             raise Exception(f"Response candidate blocked due to safety violations: {', '.join(safety_issues)}")
 
-    return response.text
-
+        # Check if parts array is not empty
+        if candidate.content.parts:
+            return candidate.content.parts[0].text
+        else:
+            print("Warning: No text parts found in the response.")
+            print(response)
+            return None # or return an empty string ''
+    else:
+        return None    
 
 def generate_summary_and_chapters(transcript_path):
     """Generates summary, chapters, and subtitle using Gemini."""
@@ -88,7 +95,7 @@ def generate_summary_and_chapters(transcript_path):
         temp_f.write(text_without_timestamps)
 
     # Generate Summary
-    summary_prompt = "Generate a short 200-word summary of this D&D fantasy session transcript. Write as a synopsis of the events, assuming the reader understands the context of the campaign." 
+    summary_prompt = "Generate a short summary of this D&D fantasy session transcript. Write as a synopsis of the events, assuming the reader understands the context of the campaign. Answer should be less than 200-words." 
     summary_response = generate_text_with_gemini(summary_prompt, temp_summary_file, 300, config["gemini"]["temperature"], config["gemini"]["safety_settings"])
     summary = process_gemini_response(summary_response)
     #print(summary_response)

@@ -91,13 +91,8 @@ def load_corrections_as_dict():
 
 
 def apply_corrections_and_formatting(input_tsv, output_txt):
-    """
-    Applies corrections and formatting to the transcribed text.
-
-    NOTE: This function's timestamp logic and revised txt file
-    construction are retained as requested.
-    The text processing part is replaced with a call to `process_text`.
-    """
+    """Applies corrections and formatting to the transcribed text."""
+    
     from .file_management import find_audio_files_folder, find_transcriptions_folder
     tsv_dir = os.path.dirname(input_tsv)
     parent_dir = os.path.dirname(tsv_dir)  # (Campaign Folder)
@@ -124,7 +119,7 @@ def apply_corrections_and_formatting(input_tsv, output_txt):
             open(output_txt, 'w', encoding='utf-8') as f_out:
 
         date_obj = datetime.strptime(date_str, '%Y_%m_%d')
-        formatted_date = date_obj.strftime('%d / %m / %Y')  # Format date
+        formatted_date = date_obj.strftime('%d/%m/%Y')  # Format date
         f_out.write(f"{title} - #{track_num} - {formatted_date}\n\n")
 
         tsv_reader = csv.reader(f_in, delimiter='\t')  # Create a TSV reader
@@ -163,7 +158,7 @@ def dictionary_update(txt_path):
         text = file.read()
     words = sorted(set(re.findall(r"\b\w+\b", text)))
     spell_checker = get_spell_checker()
-    custom_words_set = set(utils.load_custom_words()) # Load as set for faster lookup
+    custom_words_set = set(utils.load_custom_words())
 
     try:
         with open(utils.get_corrections_list_file(), "r", encoding="utf-8") as file:
@@ -180,6 +175,7 @@ def dictionary_update(txt_path):
                     file.write(f"{word} -> \n")
 
 _spell_checker = None # Initialize the global variable
+
 def get_spell_checker():
     """Return spell checker populated with custom word list."""
 
@@ -189,9 +185,9 @@ def get_spell_checker():
         _spell_checker.word_frequency.load_words(utils.load_custom_words())
         contractions_possessives = ["i'll", "i've", "he's", "she's", "it's", "we're", "they're", "i'm", "you're", "aren't", "can't", "couldn't", "didn't", "doesn't", "don't", "hadn't", "hasn't", "haven't", "isn't", "mustn't", "shan't", "shouldn't", "wasn't", "weren't", "won't", "wouldn't", "he'll", "she'll", "it'll", "we'll", "they'll", "i'd", "you'd", "he'd", "she'd", "we'd", "they'd", "that's", "what's", "who's", "where's", "when's", "why's", "how's", "here's", "there's"] 
         _spell_checker.word_frequency.load_words(contractions_possessives)
-        wn.download("oewn:2023", quiet=True)
-        en = wn.Wordnet('oewn:2023')
-        wordnet_words = [synset.lemma().name() for synset in en.synsets()]
+        wn.download("oewn:2023")
+        en = wn.Wordnet('oewn:2023', search_all_forms=True)
+        wordnet_words = [form for word in en.words() for form in word.forms()]
         _spell_checker.word_frequency.load_words(wordnet_words)
 
     return _spell_checker

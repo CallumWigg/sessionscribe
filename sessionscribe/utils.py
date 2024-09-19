@@ -10,10 +10,12 @@ with open('config.json', 'r') as config_file:
 
 def get_working_directory():
     """Return the base directory all working files are stored in."""
+    
     return config["general"]["working_directory"]
 
 def get_corrections_list_file():
     """Return path of corrections list. Not used any more."""
+
     return os.path.join(get_working_directory(), "corrections.txt")
 
 _custom_words = None
@@ -45,9 +47,16 @@ def phonetic_dict():
         }
     return _phonetic_dict
 
-def format_time(time_sec):
-    """Convert time from seconds to hh:mm:ss format."""
-    seconds = float(time_sec)
+def format_time(time_str, timestamp_format='seconds'):
+    """Convert time to hh:mm:ss format."""
+
+    if timestamp_format == 'seconds':
+        seconds = float(time_str)
+    elif timestamp_format == 'milliseconds':
+        seconds = float(time_str) / 1000
+    else:
+        raise ValueError(f"Invalid timestamp format: {timestamp_format}")
+
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"

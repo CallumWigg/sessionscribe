@@ -1,11 +1,12 @@
 import os
 import re
+import time
 from datetime import datetime
 
 import google.generativeai as genai
 from google.generativeai.types import HarmBlockThreshold, HarmCategory, GenerationConfig, SafetySettingDict
-
 from .utils import config, format_time
+
 
 # Gemini Configuration
 genai.configure(api_key=config["gemini"]["api_key"])
@@ -14,27 +15,55 @@ model = genai.GenerativeModel(
   model_name=config["gemini"]["model_name"]
 )
 
-safety_config = [
-    SafetySettingDict(
-        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        threshold=HarmBlockThreshold.BLOCK_NONE,
-    ),
-    SafetySettingDict(
-        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
-        threshold=HarmBlockThreshold.BLOCK_NONE,
-    ),
-    SafetySettingDict(
-        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        threshold=HarmBlockThreshold.BLOCK_NONE,
-    ),
-    SafetySettingDict(
-        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-        threshold=HarmBlockThreshold.BLOCK_NONE,
-    ),
-]
+def generate_text_with_gemini(prompt, input_text, max_output_tokens, temperature, safety_settings="HIGH"):
+    """Uploads text to Gemini, generates content, and handles retries."""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            file_input = genai.upload_file(input_text, mime_type="text/plain", display_name=os.path.basename(input_text))
+            while file_input.state.name == "PROCESSING":
+                time.sleep(10)
+                file_input = genai.get_file(file_input.name)
+            if file_input.state.name != "ACTIVE":
+                raise Exception(f"File {file_input.name} failed to process")
+
+            content_config = GenerationConfig(
+                max_output_tokens=max_output_tokens,
+                temperature=temperature
+            )
+
+            response = model.generate_content(
+                [prompt, file_input],
+                generation_config=content_config,
+                safety_settings=safety_settings,
+            )
+
+            return response
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {e}")
+            temperature += 0.2
+            if attempt < max_retries - 1:
+                print(f"Retrying with temperature: {temperature}")
+            else:
+                print(f"Warning: Could not generate text after {max_retries} attempts.")
+    return None
+
+def process_gemini_response(response):
+    """Checks for safety violations and extracts generated text."""
+    if response is None:
+        return None
+
+    if response.candidates:
+        candidate = response.candidates[0]
+        if candidate.finish_reason == FinishReason.SAFETY:
+            safety_issues = [rating.category.name for rating in candidate.safety_ratings if rating.severity >= HarmSeverity.SEVERITY_MEDIUM]
+            raise Exception(f"Response candidate blocked due to safety violations: {', '.join(safety_issues)}")
+
+    return response.text
+
 
 def generate_summary_and_chapters(transcript_path):
-    """Generates a summary and timestamped chapters using the Gemini API."""
+    """Generates summary, chapters, and subtitle using Gemini."""
     summary = None
     chapters = None
     with open(transcript_path, "r", encoding="utf-8") as f:
@@ -58,44 +87,16 @@ def generate_summary_and_chapters(transcript_path):
     with open(temp_summary_file, "w", encoding="utf-8") as temp_f:
         temp_f.write(text_without_timestamps)
 
-    max_retries = 3
-    temperature = config["gemini"]["temperature"]  # Initial temperature
-    for attempt in range(max_retries):
-        try:
-            file_summary = genai.upload_file(temp_summary_file, mime_type="text/plain", display_name=os.path.basename(transcript_path).replace("_revised.txt", "_summary.txt"))
-            while file_summary.state.name == "PROCESSING":
-                time.sleep(10)
-                file_summary = genai.get_file(file_summary.name)
-            if file_summary.state.name != "ACTIVE":
-                raise Exception(f"File {file_summary.name} failed to process")
-
-            content_config = GenerationConfig(
-                max_output_tokens=300,
-                temperature=temperature
-            )
-
-            summary_response = model.generate_content(
-                [file_summary, "Generate a short 200-word summary of this dungeons and dragons session transcript. Write as a synopsis of the events, assuming the reader understands the context of the campaign."],
-                generation_config=content_config,
-                safety_settings=safety_config,
-            )
-
-            if summary_response.is_blocked:
-                raise Exception("Summary generation blocked by safety filter.")
-
-            summary = summary_response.text
-            break  # Exit the retry loop if successful
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
-            temperature += 0.2  # Reduce temperature for the next attempt
-            if attempt < max_retries - 1:
-                print(f"Retrying with temperature: {temperature}")
-            else:
-                print(f"Warning: Could not generate summary for {transcript_path} after {max_retries} attempts.")
+    # Generate Summary
+    summary_prompt = "Generate a short 200-word summary of this D&D fantasy session transcript. Write as a synopsis of the events, assuming the reader understands the context of the campaign." 
+    summary_response = generate_text_with_gemini(summary_prompt, temp_summary_file, 300, config["gemini"]["temperature"], config["gemini"]["safety_settings"])
+    summary = process_gemini_response(summary_response)
+    #print(summary_response)
 
     if summary is not None:
-        summary_file_path = transcript_path.replace(".txt", "_summary.txt")  # Create summary filename
+        summary_file_path = transcript_path.replace(".txt", "_summary.txt")
 
+        # Save the summary to the file
         with open(summary_file_path, 'w', encoding='utf-8') as f:
             f.write(summary)
             desired_part = '_'.join(os.path.splitext(os.path.basename(summary_file_path))[0].split('_')[:4])
@@ -104,7 +105,7 @@ def generate_summary_and_chapters(transcript_path):
         print(f"Warning: Could not generate summary for {transcript_path}. Skipping...")
 
     # Generate Chapters (with timestamps)
-    chapters_prompt_text = """
+    chapters_prompt = """
     Generate timestamps for main chapter/topics in a Dungeons and Dragons podcast session transcript.
     Given text segments with their time, generate timestamps for main topics discussed in the session. Format timestamps as hh:mm:ss and provide clear and concise topic titles, with a short one sentence description.  
 
@@ -120,48 +121,30 @@ def generate_summary_and_chapters(transcript_path):
 
     Transcript is provided below, in the format of hh:mm:ss   |   "text":
     """
-
-    temperature = config["gemini"]["temperature"]  # Reset temperature for chapters
+    
     temp_chapters_file = transcript_path.replace("_revised.txt", "_temp_chapters.txt")
     with open(temp_chapters_file, "w", encoding="utf-8") as temp_f:
         temp_f.write(transcript_text)
+    
+    chapters_response = generate_text_with_gemini(chapters_prompt, temp_chapters_file, 300, config["gemini"]["temperature"], config["gemini"]["safety_settings"])
+    chapters = process_gemini_response(chapters_response)
 
-    for attempt in range(max_retries):
-        try:
-            file_chapters = genai.upload_file(temp_chapters_file, mime_type="text/plain", display_name=os.path.basename(transcript_path).replace("_revised.txt", "_chapters.txt"))
-            while file_chapters.state.name == "PROCESSING":
-                time.sleep(10)
-                file_chapters = genai.get_file(file_chapters.name)
-            if file_chapters.state.name != "ACTIVE":
-                raise Exception(f"File {file_chapters.name} failed to process")
+    # Generate Podcast Subtitle
+    subtitle_prompt = "Generate 10 different very short and concise, ~50 character podcast subtitles that capture the main plot points or advancements that occurred in this Dungeons and Dragons session. Avoid using character names. Output each subtitle on a new line."
+    subtitle_response = generate_text_with_gemini(subtitle_prompt, temp_summary_file, 500, 0.5*config["gemini"]["temperature"], config["gemini"]["safety_settings"])
+    subtitles = process_gemini_response(subtitle_response)
+    if subtitles is not None:
+        subtitle_file_path = transcript_path.replace(".txt", "_subtitle.txt")
+        with open(subtitle_file_path, 'w', encoding='utf-8') as f:
+            # Write each subtitle on a new line
+            for subtitle in subtitles.splitlines():
+                f.write(subtitle.strip() + "\n")
+            desired_part = '_'.join(os.path.splitext(os.path.basename(subtitle_file_path))[0].split('_')[:4])
+            print(f"Subtitles saved to: {desired_part}")
+    else:
+        print(f"Warning: Could not generate subtitles for {transcript_path}. Skipping...")
 
-            # Set the temperature for the model
-            model.generation_config["temperature"] = temperature
-
-            content_config = GenerationConfig(
-                max_output_tokens=300,
-                temperature=temperature
-            )
-
-            chapters_response = model.generate_content(
-                [file_chapters, chapters_prompt_text],
-                generation_config=content_config,
-                safety_settings=safety_config,
-            )
-
-            if chapters_response.is_blocked:
-                raise Exception("Chapters generation blocked by safety filter.")
-
-            chapters = chapters_response.text
-            break  # Exit the retry loop if successful
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
-            temperature += 0.2  # Reduce temperature for the next attempt
-            if attempt < max_retries - 1:
-                print(f"Retrying with temperature: {temperature}")
-            else:
-                print(f"Warning: Could not generate chapters for {transcript_path} after {max_retries} attempts.")
-
+    # Generate Chapters (with timestamps)
     if chapters is not None:
         chapters = sanitize_chapters(chapters)
 
@@ -173,45 +156,6 @@ def generate_summary_and_chapters(transcript_path):
             print(f"Chapters saved to: {desired_part}")
     else:
         print(f"    Warning: Could not generate chapters for {transcript_path}. Skipping...")
-
-    # Generate Podcast Subtitle
-    subtitle = None
-    try:
-        # Set the temperature for the model (consider using a lower temperature for conciseness)
-        subtitle_temp = 0.5*config["gemini"]["temperature"]
-        model.generation_config["temperature"] = subtitle_temp
-
-        content_config = GenerationConfig(
-            max_output_tokens=50,
-            temperature=subtitle_temp
-        )
-
-        subtitle_response = model.generate_content(
-            [file_summary, "Generate a very short and concise, ~50 character podcast subtitle that captures the main plot points or advancements that occurred in this Dungeons and Dragons session. Avoid using character names."],
-            generation_config=content_config,
-            safety_settings=safety_config,
-        )
-
-        if subtitle_response.is_blocked:
-            raise Exception("Subtitle generation blocked by safety filter.")
-
-        subtitle = subtitle_response.text.strip()
-
-        if len(subtitle) > 50:
-            subtitle = subtitle[:50] + "..."  # Truncate if necessary
-
-    except Exception as e:
-        print(f"Warning: Could not generate subtitle: {e}")
-
-    if subtitle is not None:
-        subtitle_file_path = transcript_path.replace(".txt", "_subtitle.txt")  # Create subtitle filename
-
-        with open(subtitle_file_path, 'w', encoding='utf-8') as f:
-            f.write(subtitle)
-            desired_part = '_'.join(os.path.splitext(os.path.basename(subtitle_file_path))[0].split('_')[:4])
-            print(f"Subtitle saved to: {desired_part}")
-    else:
-        print(f"    Warning: Could not generate subtitle for {transcript_path}. Skipping...")
 
     # Delete the temporary files
     os.remove(temp_chapters_file)
@@ -244,12 +188,14 @@ def sanitize_chapters(chapters_text):
         print("Warning: No chapters found in the generated text.")
         return chapters_text  # Return the original text if no chapters are found
 
-def collate_summaries(directory):
-    """Collate individual summary files into a single summary file for the campaign."""
+def collate_summaries(transcriptions_folder):
+    """Collate individual summary files from the transcriptions folder into 
+    a single summary file in the parent (campaign) folder.
+    """
     collated_data = []
 
-    for filename in os.listdir(directory):
-        date_match = re.match(r'^(\d{4}_\d{2}_\d{2})_.*', filename)  # Match YYYY_MM_DD pattern
+    for filename in os.listdir(transcriptions_folder):
+        date_match = re.match(r'^(\d{4}_\d{2}_\d{2})_.*', filename) 
         if not date_match:
             continue
 
@@ -257,13 +203,13 @@ def collate_summaries(directory):
         date = datetime.strptime(date_str, '%Y_%m_%d')
 
         if '_norm_revised.txt' in filename and not filename.endswith('_summary.txt'):
-            with open(os.path.join(directory, filename), 'r', encoding='utf-8') as f:
+            with open(os.path.join(transcriptions_folder, filename), 'r', encoding='utf-8') as f:
                 title = f.readline().strip()
             print(f"Title: {title}")
             collated_data.append((date, title, None))
 
         elif filename.endswith('_norm_revised_summary.txt'):
-            with open(os.path.join(directory, filename), 'r', encoding='utf-8') as f:
+            with open(os.path.join(transcriptions_folder, filename), 'r', encoding='utf-8') as f:
                 summary = f.read().strip()
             sanitized_summary = sanitize_summary(summary)
 
@@ -272,14 +218,15 @@ def collate_summaries(directory):
                     collated_data[i] = (stored_date, stored_title, sanitized_summary)
                     break
             else:
-                collated_data.append((date, None, sanitized_summary))  # If title is not found, append summary alone
+                collated_data.append((date, None, sanitized_summary)) 
 
     collated_data.sort(key=lambda x: x[0])  # Sort data by date
 
-    folder_name = os.path.basename(directory)
-    output_filename = f"{folder_name}_Collated_Summary.txt"
+    campaign_folder = os.path.dirname(transcriptions_folder)  # Get the parent campaign folder
+    folder_name = os.path.basename(campaign_folder)
+    output_filename = f"{folder_name} - Collated Summary.txt"  # Updated filename format
 
-    with open(os.path.join(directory, output_filename), 'w', encoding='utf-8') as output_file:
+    with open(os.path.join(campaign_folder, output_filename), 'w', encoding='utf-8') as output_file:
         for date, title, summary in collated_data:
             if title:
                 output_file.write(title + "\n")
@@ -287,3 +234,17 @@ def collate_summaries(directory):
                 output_file.write(summary + "\n\n")
 
     print(f"Collated summary file generated: {output_filename}")
+
+def bulk_summarize_transcripts(campaign_folder):
+    """Summarizes all revised transcription files in a campaign folder."""
+    from .file_management import find_transcriptions_folder
+    transcriptions_folder = find_transcriptions_folder(campaign_folder)
+    if transcriptions_folder:
+        for filename in os.listdir(transcriptions_folder):
+            if filename.endswith("_revised.txt") and "_norm" in filename:
+                file_path = os.path.join(transcriptions_folder, filename)
+                print(f"Summarizing: {file_path}")
+                generate_summary_and_chapters(file_path)  # Use existing summarization function
+        collate_summaries(transcriptions_folder)  # Collate after summarizing all files
+    else:
+        print(f"No 'Transcriptions' folder found in {campaign_folder}")

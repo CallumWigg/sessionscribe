@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import subprocess
 
 from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4, MP4Cover
@@ -28,7 +29,17 @@ def convert_to_m4a(file_path, title):
     campaign_name = os.path.basename(os.path.dirname(input_dir))
     file_name = os.path.splitext(input_file)[0]
     file_date = file_name[:10]
-    output_file = f"{file_date}_{file_name[11:]}_norm.m4a"
+
+    # Extract part number (if present)
+    part_match = re.search(r'_p(\d+)', input_file)
+    part_number = part_match.group(1) if part_match else None
+
+    # Modify output filename to include part number
+    if part_number:
+        output_file = f"{file_date}_{file_name[11:].replace(f'_p{part_number}', '')}_p{part_number}_norm.m4a"
+    else:
+        output_file = f"{file_date}_{file_name[11:]}_norm.m4a"
+    
     output_path = os.path.join(input_dir, output_file)
 
     # Improved Track Number Logic (Corrected)
@@ -47,7 +58,7 @@ def convert_to_m4a(file_path, title):
     for base_name, files in files_by_base_name.items():
         for i, file in enumerate(sorted(files)):  # Sort files within each base name group
             if file == output_file:  # Found the current file
-                new_track_number += i  
+                new_track_number += i
                 break
         else:  # Loop finished without finding the current file
             new_track_number += len(files)  # Add all files in the base name group
@@ -63,7 +74,6 @@ def convert_to_m4a(file_path, title):
         "tracknumber": str(new_track_number)
     }
 
-    apply_metadata(file_path, metadata)
     (
         ffmpeg
         .input(file_path)
@@ -86,19 +96,87 @@ def convert_to_m4a(file_path, title):
     return output_path
 
 def search_audio_files():
-    """Trawl through working directory and grab the all the audio files in the last 7 days."""
+    """Trawl through working directory and grab the all the audio files in the last 100 days, 
+    excluding those that have a corresponding _norm file.
+    """
     audio_files = []
     current_time = datetime.datetime.now()
-    cutoff_time = current_time - datetime.timedelta(days=7)
+    cutoff_time = current_time - datetime.timedelta(days=100)
 
     for root, _, files in os.walk(get_working_directory()):
         for file in files:
             if file.endswith((".wav", ".m4a", ".flac")) and "_norm" not in file:
                 file_path = os.path.join(root, file)
-                file_modified_time = datetime.datetime.fromtimestamp(os.path.getmtime(file_path))
-                if file_modified_time >= cutoff_time:
-                    audio_files.append(file_path)
-    return audio_files
+                norm_file_path = file_path.replace(".", "_norm.")  # Construct the _norm file path
+                
+                # Check if _norm version exists 
+                if not os.path.exists(norm_file_path):
+                    file_modified_time = datetime.datetime.fromtimestamp(os.path.getmtime(file_path))
+                    if file_modified_time >= cutoff_time:
+                        audio_files.append(file_path)
+    return audio_files[:20]
+
+def calculate_target_bitrate(file_path):
+    """Calculates the target bitrate based on file duration and desired file size."""
+    input_duration = float(ffmpeg.probe(file_path)['format']['duration'])
+    target_size = config["general"]["ffmpeg_target_size_mb"] * 1024 * 1024
+    target_bitrate = math.floor((target_size * 8) / (input_duration * 1024))
+    return target_bitrate
+
+def split_audio_file(file_path):
+    """Splits a long audio file into multiple parts based on user input."""
+    input_duration = float(ffmpeg.probe(file_path)['format']['duration'])
+    target_bitrate = config["general"]["minimum_bitrate_kbps"]
+    target_size_bytes = config["general"]["ffmpeg_target_size_mb"] * 1024 * 1024
+
+    # Calculate the maximum duration per part to achieve the target bitrate
+    max_duration_per_part = (target_size_bytes * 8) / (target_bitrate * 1024)
+
+    # Calculate the number of parts needed
+    num_parts = math.ceil(input_duration / max_duration_per_part)
+
+    print(f"This file is very long ({input_duration / 3600:.2f} hours).")
+    print(f"To achieve a minimum bitrate of {target_bitrate} kbps with a target size of {config['general']['ffmpeg_target_size_mb']} MB,")
+    print(f"it is suggested to split the file into {num_parts} parts, each with an approximate duration of {max_duration_per_part / 3600:.2f} hours.")
+
+    # Open audio player for user to identify split points
+    try:
+        if os.name == 'nt':  # For Windows
+            os.startfile(file_path)
+        elif os.name == 'posix':  # For macOS and Linux
+            subprocess.call(('open', file_path))
+        else:
+            print("Warning: Could not determine operating system to open audio player.")
+    except Exception as e:
+        print(f"Warning: Could not open audio player: {e}")
+
+    parts = []
+    start_time = 0
+    for i in range(num_parts - 1):
+        split_time_str = input(f"Enter the split timecode for part {i+1} (hh:mm:ss): ")
+        split_time = sum(int(x) * 60**i for i, x in enumerate(reversed(split_time_str.split(':'))))
+
+        output_file = file_path.replace(".m4a", f"_p{i+1}.m4a")
+        (
+            ffmpeg
+            .input(file_path)
+            .output(output_file, ss=start_time, to=split_time, c='copy')
+            .run()
+        )
+        parts.append(output_file)
+        start_time = split_time
+
+    # Add the last part
+    output_file = file_path.replace(".m4a", f"_p{num_parts}.m4a")
+    (
+        ffmpeg
+        .input(file_path)
+        .output(output_file, ss=start_time, c='copy')
+        .run()
+    )
+    parts.append(output_file)
+
+    return parts
 
 def bulk_normalize_audio(campaign_folder):
     """Normalizes audio files in a specified campaign folder."""

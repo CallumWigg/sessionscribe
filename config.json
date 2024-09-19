@@ -2,17 +2,18 @@
   "general": {
     "working_directory": "BASE_FOLDER_FOR_EVERYTHING",
     "ffmpeg_target_size_mb": 140,
-    "summary_skip_minutes": 0
+    "summary_skip_minutes": 0,
+    "minimum_bitrate_kbps": 100
   },
   "transcription": {
     "model": "faster-distil-medium.en",
     "language": "en",
     "device": "auto",
-    "device_options": [
-      "cpu",
-      "cuda",
-      "auto"
-    ],
+      "device_options": [
+        "cpu",
+        "cuda",
+        "auto"
+      ],
     "compute": "auto",
     "compute_options": [
       "default,auto,int8,int8_float16,int8_bfloat16,int8_float32,int16,float16,float32,bfloat16"
@@ -21,7 +22,8 @@
   "gemini": {
     "api_key": "GEMINI_API_KEY",
     "model_name": "gemini-1.5-flash",
-    "temperature": 1
+    "temperature": 1,
+    "safety_settings": "MEDIUM"
   },
   "dictionaries": {
     "correction_threshold": 90

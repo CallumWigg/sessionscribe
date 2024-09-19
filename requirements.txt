@@ -1,9 +1,7 @@
-ffmpeg-python
-faster-whisper
-google-generativeai
-phonetics
-pyspellchecker
-levenshtein
-rapidfuzz
-silero-vad
-mutagen
+ffmpeg-python==0.2.0
+google-generativeai==0.8.1
+mutagen==1.47.0
+phonetics==1.0.5
+pyspellchecker==0.8.1
+faster-whisper==1.0.3
+wn==0.9.5

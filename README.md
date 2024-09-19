@@ -43,27 +43,18 @@ you'll need to create a file called keys.py, with gemini_key = "insert your key 
 set your working directory of where the podcast files will be, then create a new campaign.
 
 ## to do
-oh god the list keeps growing faster than i can tick them off
-- [ ] still refactoring, so a lotta stuff is broken or not used correctly. coming soon.
-- [ ] its a bit of a squishy wizard at the mo, very easy to break. my bad.
-- [ ] Check transcripts for repeating words. (the text will have ~10 lines that all have the same repeating word/phrase) If it’s a lot retranscribe. If it has to be retranscribed 3 times, just leave it after the third one. i reckon i fixed faster-whisper to stop doing it, but maybe not.
-- [ ] summary skip first 15 minutes because of the recap.
-- [ ] different word dictionary for each campaign, so there’s no cross-contamination.
-- [ ] implement session_length and other general stats and data. Need somewhere to store it all, ideally rewrite it so that all the data is stored somewhere in a database.
-- [ ] following on, probably should get a database with all info so i dont need to download files each time from onedrive.
-- [ ] podcast subtitle generation (50 character summary)
-- [ ] logic for if track time is too long (something like 7 hrs or so), prompt user to split the file. maybe open it, wait for them to scrub through to a good point, then split into two and name appropriately. should be bitrate based, as LONG sessions get really crunch at 150mb
-- [ ] bulk functions dont work currently
-- [ ] each combine/revised exports to different locations?
-- [ ] want to be able to just generate revised for one at a time, or only those that havent been done yet. all those functions should be better
-- [ ] sanitize chapters to only have the chapters.
-- [ ] function which will look through all the files and check theyve all been transcribed, summaries, chaptered, and everything. maybe this ties into the database of what is done and whats not
-- [ ] fix formatting of the summaries.
-- [ ] check if wack_dictionaries exists, otherwise make it
-- [ ] investigate [this](https://github.com/zh-plus/openlrc) for better dictionary words
-- [ ] fix fuzzy stuff, currently it's only using fuzzy and phoenetic is just sitting there doing nothing.
-- [ ] helper functions for all the file locations
-- [ ] get batch functions to work properly.
+~~oh god the list keeps growing faster than i can tick them off~~
+
+okay its getting smaller 
+- [ ]  about to do a complete overhaul of the ui to make it flow more logically, and more customisable.
+- [ ]  different word dictionary for each campaign, so there’s no cross-contamination.
+- [ ]  fix the silly summary compile. dunno why its still bad.
+- [ ]  implement session_length and other general stats and data. Need somewhere to store it all, ideally rewrite it so that all the data is stored somewhere in a database.
+- [ ]  bulk functions dont work currently
+- [ ]  each combine/revised exports to different locations?
+- [ ]  want to be able to just generate revised for one at a time, or only those that havent been done yet.
+- [ ]  function which will look through all the files and check theyve all been transcribed, summaries, chaptered, and everything, for missing files.
+- [ ]  Check transcripts for repeating words. (the text will have ~10 lines that all have the same repeating word/phrase) If it’s a lot retranscribe. If it has to be retranscribed 3 times, just leave it after the third one.
 
 
 ### deep future to do pipe dream never going to happen
@@ -71,5 +62,8 @@ oh god the list keeps growing faster than i can tick them off
     - [ ] upload to wiki like fandom
     - [ ] upload to podcast/rss service
 - [ ] transcript saved in a html that users can access? search better, seperate page for summaries? data, etc.
-- [ ] [semantic search](https://github.com/arunsupe/semantic-grep), i tried this but its super slow. is there a way to cache it all after loading once? cause currently it takes ages to cache the model.
-- [ ] implement GUI for it all, which will allow you to correctly set up folder structure, locations (and save them to the info file)
+- [ ]  [semantic-grep](https://github.com/arunsupe/semantic-grep) semantic search, investigate how it works and if its worth (that one isnt great, very slow and only really synonyms)
+    - [ ]  [semantra](https://github.com/freedmand/semantra) - html ui, try with above todo?
+    - [ ]  [Semantify](https://github.com/MohammedAly22/Semantify) another option maybe
+- [ ] implement GUI for it all, which will allow you to correctly set up folder structure, locations (and save them to the info file, drag and drop of files in?)
+- [ ] functionarlity with ai of choice (chatgpt, gemini, claude, etc. i've only got free access to gemini, and most dont have long enough context windows, so not in a rush)

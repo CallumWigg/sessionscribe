@@ -1,6 +1,6 @@
 import os
 import json
-from phonetics import metaphone # Keep for phonetic_dict, though text_processing.py also imports
+from phonetics import metaphone
 
 # Load configuration
 CONFIG_FILE_PATH = 'config.json'
@@ -70,43 +70,33 @@ def load_config():
 load_config() # Load config when module is imported
 
 def get_working_directory():
-    """Return the base directory all working files are stored in.
-    Ensures the path is absolute and normalized.
-    """
+    """Return the base directory where campaign folders are stored."""
     wd = config.get("general", {}).get("working_directory", ".")
-    abs_wd = os.path.abspath(os.path.expanduser(wd)) # Expand ~ if used
+    abs_wd = os.path.abspath(os.path.expanduser(wd))
     if not os.path.isdir(abs_wd):
-        print(f"Warning: Configured working directory '{abs_wd}' (from '{wd}') does not exist or is not a directory.")
-        # Fallback to current directory if configured one is bad, or could raise error
-        # For now, let's try to create it if it's a reasonable subpath of CWD or user home
-        # This is risky. Better to just warn and default to "."
-        if wd != ".": # If it was something specific and bad
-             print("Defaulting working directory to the current script location's parent or '.'")
-             # Attempt to use script's parent dir or CWD as a last resort
-             try:
-                script_dir_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                if os.path.isdir(script_dir_parent): return script_dir_parent
-             except: pass
-             return os.path.abspath(".") # Fallback to current execution directory
+        print(f"Warning: Configured working directory '{abs_wd}' (from '{wd}') does not exist.")
+        try:
+            os.makedirs(abs_wd, exist_ok=True)
+            print(f"Created working directory: {abs_wd}")
+        except OSError as e:
+            print(f"Could not create working directory: {e}. Defaulting to '.'")
+            return os.path.abspath(".")
     return abs_wd
 
+def get_corrections_list_file(campaign_path):
+    """Return absolute path of the campaign-specific corrections list file."""
+    return os.path.join(campaign_path, "corrections.txt")
 
-def get_corrections_list_file():
-    """Return absolute path of corrections list file."""
-    return os.path.join(get_working_directory(), "corrections.txt")
-
-_custom_words_cache = None
-def load_custom_words():
-    """Return a cached list of custom words from the wack_dictionary.txt.
-    Loads from file only once unless cache is cleared (e.g. for refresh).
+_custom_words_cache = {} # Cache per campaign_path
+def load_custom_words(campaign_path):
     """
-    global _custom_words_cache
-    # Allow forced reload if needed, e.g. by setting _custom_words_cache to None externally
-    if _custom_words_cache is not None:
-        return _custom_words_cache
+    Return a cached list of custom words from the campaign's wack_dictionary.txt.
+    """
+    if campaign_path in _custom_words_cache:
+        return _custom_words_cache[campaign_path]
 
     dictionary_file_name = "wack_dictionary.txt"
-    dictionary_file_path = os.path.join(get_working_directory(), dictionary_file_name)
+    dictionary_file_path = os.path.join(campaign_path, dictionary_file_name)
 
     custom_words = []
     if os.path.exists(dictionary_file_path):
@@ -116,21 +106,10 @@ def load_custom_words():
         except IOError as e:
             print(f"Error reading custom dictionary {dictionary_file_path}: {e}")
     else:
-        print(f"Custom dictionary '{dictionary_file_name}' not found in working directory.")
-        # Optionally create a default one here too, like in sessionscribe.py main()
+        print(f"Custom dictionary '{dictionary_file_name}' not found in '{campaign_path}'.")
         
-    _custom_words_cache = custom_words
-    return _custom_words_cache
-
-_phonetic_dict_cache = None
-def phonetic_dict(): # This function is also in text_processing.py. Consolidate or ensure consistency.
-    """Return a dictionary of phonetic representations of custom words for faster lookup."""
-    global _phonetic_dict_cache
-    if _phonetic_dict_cache is None:
-        _phonetic_dict_cache = {
-            metaphone(word.lower()): word for word in load_custom_words() # Store original case, key on lower's metaphone
-        }
-    return _phonetic_dict_cache
+    _custom_words_cache[campaign_path] = custom_words
+    return custom_words
 
 def format_time(time_str, timestamp_format='seconds'):
     """Convert time string (seconds or milliseconds) to hh:mm:ss format."""
@@ -140,20 +119,16 @@ def format_time(time_str, timestamp_format='seconds'):
         elif timestamp_format == 'milliseconds':
             total_seconds = float(time_str) / 1000.0
         else:
-            # Attempt to infer if it's a number
             val = float(time_str)
-            # Heuristic: if it's a large number without decimal, assume ms. Otherwise, seconds.
-            if '.' in time_str or val < 100000: # Arbitrary threshold for assuming seconds unless very large int
+            if '.' in time_str or val < 100000:
                 total_seconds = val
             else:
                 total_seconds = val / 1000.0
-            print(f"Warning: Unknown timestamp_format '{timestamp_format}', inferred based on value.")
             
-    except ValueError:
-        print(f"Warning: Could not parse time string '{time_str}' as float. Returning original.")
-        return time_str # Return original if unparseable
+    except (ValueError, TypeError):
+        return "00:00:00" # Return a default for invalid input
 
-    if total_seconds < 0: total_seconds = 0 # Handle negative times if they occur
+    if total_seconds < 0: total_seconds = 0
 
     hours, remainder = divmod(int(total_seconds), 3600)
     minutes, seconds = divmod(remainder, 60)

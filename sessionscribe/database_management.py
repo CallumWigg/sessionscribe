@@ -4,10 +4,11 @@ import re
 import json
 from datetime import datetime
 
-import ffmpeg
+# C-IMPROVEMENT: The ffmpeg import is no longer needed here.
+# import ffmpeg
 
-# Local import to avoid circular dependency issues at module load time
-from . import file_management
+# C-IMPROVEMENT: The problematic circular import is removed.
+# from . import file_management 
 from .utils import config
 
 DATABASE_NAME = "sessionscribe.db"
@@ -85,26 +86,33 @@ def add_episode(campaign_path, episode_data):
     conn = get_db_connection(campaign_path)
     cursor = conn.cursor()
 
-    cursor.execute("SELECT MAX(episode_number) FROM Episodes")
-    max_episode_num = cursor.fetchone()[0]
-    next_episode_num = (max_episode_num or 0) + 1
-    
-    episode_data['episode_number'] = next_episode_num
+    try:
+        cursor.execute("SELECT MAX(episode_number) FROM Episodes")
+        max_episode_num = cursor.fetchone()[0]
+        next_episode_num = (max_episode_num or 0) + 1
+        
+        episode_data['episode_number'] = next_episode_num
 
-    cols = ', '.join(episode_data.keys())
-    placeholders = ', '.join('?' * len(episode_data))
-    sql = f"INSERT INTO Episodes ({cols}) VALUES ({placeholders})"
-    cursor.execute(sql, list(episode_data.values()))
-    episode_id = cursor.lastrowid
+        cols = ', '.join(episode_data.keys())
+        placeholders = ', '.join('?' * len(episode_data))
+        sql = f"INSERT INTO Episodes ({cols}) VALUES ({placeholders})"
+        cursor.execute(sql, list(episode_data.values()))
+        episode_id = cursor.lastrowid
 
-    cursor.execute(
-        "INSERT INTO ProcessingStatus (episode_id, last_processed) VALUES (?, ?)",
-        (episode_id, datetime.now())
-    )
-    
-    conn.commit()
-    conn.close()
-    return episode_id
+        cursor.execute(
+            "INSERT INTO ProcessingStatus (episode_id, last_processed) VALUES (?, ?)",
+            (episode_id, datetime.now())
+        )
+        
+        conn.commit()
+        return episode_id
+    except sqlite3.Error as e:
+        print(f"Database error in add_episode: {e}")
+        conn.rollback()
+        return None
+    finally:
+        conn.close()
+
 
 def update_episode_data(campaign_path, episode_id, data_dict):
     """Updates multiple columns for a given episode_id in the Episodes table."""
@@ -133,8 +141,10 @@ def update_episode_path(campaign_path, episode_id, file_type, file_path):
         return
 
     try:
+        # Ensure path is relative for portability
         relative_path = os.path.relpath(file_path, campaign_path)
     except ValueError:
+        # This can happen on Windows if paths are on different drives.
         relative_path = file_path
 
     conn = get_db_connection(campaign_path)
@@ -170,6 +180,23 @@ def get_episode_by_id(campaign_path, episode_id):
     conn.close()
     return episode
 
+def get_episode_by_audio_path(campaign_path, audio_file_path):
+    """Finds an episode by its original or normalized audio file path."""
+    try:
+        relative_path = os.path.relpath(audio_file_path, campaign_path)
+    except ValueError:
+        relative_path = audio_file_path
+
+    conn = get_db_connection(campaign_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT episode_id FROM Episodes 
+        WHERE original_audio_file = ? OR normalized_audio_file = ?
+    """, (relative_path, relative_path))
+    result = cursor.fetchone()
+    conn.close()
+    return result['episode_id'] if result else None
+
 def get_episode_by_transcript_path(campaign_path, transcript_path):
     """Finds an episode by its revised transcript file path."""
     try:
@@ -186,20 +213,67 @@ def get_episode_by_transcript_path(campaign_path, transcript_path):
 def get_episodes_for_campaign(campaign_path, where_clause=""):
     """Retrieves all episodes for a campaign, with an optional WHERE clause."""
     conn = get_db_connection(campaign_path)
+    # Ensure a space is present if a where_clause is provided
     sql = f"SELECT * FROM Episodes e JOIN ProcessingStatus ps ON e.episode_id = ps.episode_id {where_clause} ORDER BY e.episode_number"
     episodes = conn.execute(sql).fetchall()
     conn.close()
     return episodes
 
-def find_original_audio(audio_folder, normalized_basename):
-    """Finds the original audio file that corresponds to a normalized file."""
-    if not audio_folder: return None
-    
-    base_name_to_match = normalized_basename.replace("_norm", "")
-    supported_extensions = tuple(config["general"].get("supported_audio_extensions", [".wav", ".m4a", ".flac", ".mp3"]))
+# C-IMPROVEMENT: This function is moved to file_management.py
+# def find_original_audio(...)
 
-    for filename in os.listdir(audio_folder):
-        if "_norm" not in filename and filename.lower().endswith(supported_extensions):
-            if os.path.splitext(filename)[0] == base_name_to_match:
-                return os.path.join(audio_folder, filename)
-    return None
+def clear_processing_status(campaign_path, episode_id):
+    """Resets all processing flags for an episode to False."""
+    conn = get_db_connection(campaign_path)
+    conn.execute("""
+        UPDATE ProcessingStatus
+        SET normalized = 0, transcribed = 0, text_processed = 0, summarized = 0, 
+            chapters_generated = 0, subtitles_generated = 0, last_processed = ?
+        WHERE episode_id = ?
+    """, (datetime.now(), episode_id))
+    conn.commit()
+    conn.close()
+    print(f"Processing flags for Episode ID {episode_id} have been cleared.")
+
+def check_database_integrity(campaign_path):
+    """Scans the database for file paths that don't exist on disk."""
+    episodes = get_episodes_for_campaign(campaign_path)
+    problems = []
+    file_fields = [
+        "original_audio_file", "normalized_audio_file", "transcription_file",
+        "summary_file", "chapters_file", "subtitle_file"
+    ]
+
+    for episode in episodes:
+        for field in file_fields:
+            relative_path = episode[field]
+            if relative_path:
+                full_path = os.path.join(campaign_path, relative_path)
+                if not os.path.exists(full_path):
+                    problems.append({
+                        "episode_id": episode['episode_id'],
+                        "episode_title": episode['episode_title'],
+                        "field": field,
+                        "path": relative_path
+                    })
+    return problems
+
+def clear_invalid_paths(campaign_path, problems):
+    """Sets the fields for invalid paths to NULL in the database."""
+    if not problems:
+        return 0
+    
+    conn = get_db_connection(campaign_path)
+    cursor = conn.cursor()
+    count = 0
+    for problem in problems:
+        sql = f"UPDATE Episodes SET {problem['field']} = NULL WHERE episode_id = ?"
+        cursor.execute(sql, (problem['episode_id'],))
+        count += 1
+    
+    conn.commit()
+    conn.close()
+    return count
+
+# C-IMPROVEMENT: This function is moved to the new data_migration.py module.
+# def run_migration_for_campaign(...)

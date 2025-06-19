@@ -32,6 +32,6 @@
     "artist_name": "PODCAST_NAME_HERE",
     "genre": "Podcast",
     "audio_channels": 2,
-    "samping_rate": 44100
+    "sampling_rate": 44100
   }
 }

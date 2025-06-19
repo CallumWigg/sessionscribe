@@ -1,8 +1,9 @@
 import os
 import re
+import sys
 import subprocess
-import json
 from datetime import datetime
+from tqdm import tqdm
 
 try:
     from tkinter import Tk, filedialog
@@ -10,243 +11,410 @@ except ImportError:
     Tk, filedialog = None, None
     print("Warning: tkinter not found. File dialog functionality will be disabled.")
 
-# Import functions from modules
-from .audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio, apply_metadata
+from .audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio
 from .transcription import transcribe_and_revise_audio
 from .summarisation import generate_summary_and_chapters, collate_summaries, bulk_summarize_transcripts
-from .file_management import retranscribe_single_file, resummarise_single_file, generate_new_campaign, transcribe_combine, find_transcriptions_folder, find_audio_files_folder
-from .user_interaction import choose_from_list, get_yes_no_input, get_user_input
+from .file_management import (
+    retranscribe_single_file, resummarise_single_file, generate_new_campaign, 
+    transcribe_combine, find_audio_files_folder, dictionary_update_wrapper
+)
+from .user_interaction import choose_from_list, get_yes_no_input
 from .utils import get_working_directory, config
 from . import database_management as db
+from . import data_migration
 
 
 def display_menu(menu_title, menu_options):
-    """Displays a menu, gets user input, and returns the selected option tuple."""
-    while True:
-        padding_char = "*"
-        title_padding_len = (80 - len(menu_title) - 2) // 2
-        title_padding_str = ' ' * title_padding_len
-        
-        print("\n" + padding_char * 80)
-        print(f"{padding_char}{title_padding_str}{menu_title}{title_padding_str}{padding_char if (len(menu_title) % 2 == 0) else ' '+padding_char}")
-        print(padding_char * 80)
-
-        for _, label, *_ in menu_options:
-            print(label)
-        print("x. Back / Exit")
-        print(padding_char * 80)
-
-        choice = input("Enter your choice: ").lower().strip()
-        if choice == "x":
-            return None
-        
-        # Match by leading number or letter
-        matched_options = [opt for opt in menu_options if opt[1].lower().startswith(choice)]
-        if len(matched_options) == 1:
-            return matched_options[0]
-        else:
-            print("Invalid or ambiguous choice. Please try again.")
+    """
+    Displays a consistently formatted menu and returns the user's choice.
+    menu_options is a list of tuples: (key, description).
+    """
+    print("\n" + "="*80)
+    print(f"| {menu_title:^76} |")
+    print("="*80)
+    
+    for key, description in menu_options:
+        print(f"  {key}. {description}")
+    print("  x. Back / Exit")
+    print("-"*80)
+    
+    choice = input("Enter your choice: ").lower().strip()
+    return choice
 
 def select_campaign():
-    """Handles campaign selection from the database."""
+    """Handles campaign selection."""
     base_dir = get_working_directory()
-    campaign_folders = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and not d.startswith(('.', 'x '))]
+    campaign_folders = sorted([
+        d for d in os.listdir(base_dir) 
+        if os.path.isdir(os.path.join(base_dir, d)) and not d.startswith(('.', '_', 'x '))]
+    )
     
     if not campaign_folders:
         print("No campaign folders found in the working directory.")
         return None
 
-    campaign_menu_options = [(os.path.join(base_dir, p), f"{i + 1}. {p}") for i, p in enumerate(campaign_folders)]
+    chosen_campaign = choose_from_list(campaign_folders, "Select Campaign")
+    if chosen_campaign:
+        return os.path.join(base_dir, chosen_campaign)
+    return None
+
+def select_episode(campaign_path, header_text="Select an Episode", return_index=False):
+    """
+    Displays a list of episodes and prompts the user to select one.
+    Returns the selected episode object, and optionally its index in the list.
+    """
+    episodes = db.get_episodes_for_campaign(campaign_path)
+    if not episodes:
+        print("No episodes found in this campaign's database.")
+        return (None, -1) if return_index else None
+
+    episode_choices = [f"#{ep['episode_number']} (S{ep['season_number'] or '?'}) - {ep['episode_title']}" for ep in episodes]
     
-    selected_option = display_menu("Select Campaign", campaign_menu_options)
-    return selected_option[0] if selected_option else None
+    chosen_str = choose_from_list(episode_choices, header_text)
+    if not chosen_str:
+        return (None, -1) if return_index else None
+        
+    choice_index = episode_choices.index(chosen_str)
+    selected_episode = episodes[choice_index]
+    
+    return (selected_episode, choice_index) if return_index else selected_episode
 
 
-def process_full_pipeline_wrapper():
-    """Wrapper for the full file processing pipeline."""
-    # Step 1: Select or create a campaign
+def open_file(file_path):
+    """Opens a file using the default system application."""
+    abs_file_path = os.path.abspath(file_path)
+    if not os.path.exists(abs_file_path):
+        print(f"Error: File not found: {abs_file_path}")
+        return
+    try:
+        if sys.platform == "win32":
+            os.startfile(abs_file_path)
+        elif sys.platform == "darwin": # macOS
+            subprocess.call(('open', abs_file_path))
+        else: # linux
+            subprocess.call(('xdg-open', abs_file_path))
+    except Exception as e:
+        print(f"Error opening file '{abs_file_path}': {e}")
+
+
+def move_file_to_campaign(file_path, campaign_path):
+    """Moves a file to a campaign's 'Audio Files' folder."""
+    audio_files_folder = find_audio_files_folder(campaign_path)
+    if not audio_files_folder: return None
+
+    new_file_path = os.path.join(audio_files_folder, os.path.basename(file_path))
+    if os.path.abspath(file_path) == os.path.abspath(new_file_path):
+        print("File is already in the target campaign's audio folder.")
+        return file_path
+
+    if os.path.exists(new_file_path):
+        if not get_yes_no_input(f"File '{os.path.basename(file_path)}' already exists in destination. Overwrite?"):
+            return None
+        os.remove(new_file_path)
+        
+    try:
+        os.rename(file_path, new_file_path)
+        print(f"File moved to {os.path.relpath(new_file_path, get_working_directory())}")
+        return new_file_path
+    except Exception as e:
+        print(f"Error moving file: {e}")
+        return None
+
+def process_full_pipeline(campaign_path, file_path, title):
+    """Processes a single file through the full pipeline."""
+    print(f"\n--- Starting Full Pipeline for: {os.path.basename(file_path)} ---")
+    
+    print("\n[Step 1/4] Converting to M4A and Normalizing...")
+    episode_id = convert_to_m4a(campaign_path, file_path, title)
+    if not episode_id:
+        print("Normalization/conversion failed. Aborting pipeline.")
+        return
+
+    # Refetch episode data to ensure all fields are current
+    episode = db.get_episode_by_id(campaign_path, episode_id)
+    print(f"Normalized audio and created Episode #{episode['episode_number']}.")
+
+    print("\n[Step 2/4] Transcribing Audio...")
+    revised_txt_file_path = transcribe_and_revise_audio(campaign_path, episode_id)
+    if not revised_txt_file_path:
+        print("Transcription failed. Aborting pipeline.")
+        return
+    print(f"Revised transcription created.")
+
+    print("\n[Step 3/4] Generating Summary and Chapters...")
+    generate_summary_and_chapters(campaign_path, episode_id)
+
+    print("\n[Step 4/4] Updating Combined Campaign Files...")
+    transcribe_combine(campaign_path)
+    collate_summaries(campaign_path)
+    
+    print(f"\n--- Full Pipeline Completed for: {episode['episode_title']} ---")
+
+def process_file_from_command_line(file_path):
+    """Handles processing a file passed via command line or drag-and-drop."""
+    print(f"File detected: {os.path.basename(file_path)}")
+    if not os.path.exists(file_path):
+        print("Error: File not found.")
+        return
+
     campaign_path = select_campaign()
     if not campaign_path:
         if get_yes_no_input("No campaign selected. Create a new one?"):
             name = input("Enter new campaign name: ")
             abbrev = input(f"Enter abbreviation for '{name}': ")
             if name and abbrev:
-                campaign_path, _, _ = generate_new_campaign(name, abbrev, get_working_directory())
+                campaign_path = generate_new_campaign(name, abbrev, get_working_directory())
             if not campaign_path:
                 print("Campaign creation failed. Aborting.")
                 return
         else:
             return
-
-    # Step 2: Select an audio file to process
-    file_path = select_file(campaign_path) # Select file, which can come from outside campaign
-    if not file_path:
+    
+    final_file_path = move_file_to_campaign(file_path, campaign_path)
+    if not final_file_path:
+        print("File move failed. Aborting.")
         return
 
-    # Step 3: Ensure file is in the campaign's audio folder
-    audio_folder = find_audio_files_folder(campaign_path)
-    if os.path.dirname(file_path) != audio_folder:
-        file_path = move_file_to_campaign(file_path, campaign_path)
-        if not file_path:
-            print("File move failed. Aborting pipeline.")
-            return
-
-    # Step 4: Get title and run pipeline
-    title_from_filename = os.path.splitext(os.path.basename(file_path))[0]
-    title_from_filename = re.sub(r"^\d{4}_\d{2}_\d{2}_?", "", title_from_filename).replace("_", " ").strip()
-    title = input(f"Enter the title for the episode (default: '{title_from_filename}'): ") or title_from_filename
+    title_from_filename = re.sub(r"^\d{4}[_-]\d{2}[_-]\d{2}_?", "", os.path.splitext(os.path.basename(final_file_path))[0]).replace("_", " ").strip()
+    title = input(f"Enter episode title (default: '{title_from_filename}'): ") or title_from_filename
     
-    process_full_pipeline(campaign_path, file_path, title)
+    process_full_pipeline(campaign_path, final_file_path, title)
+    input("\nProcessing complete. Press Enter to exit.")
 
-def process_full_pipeline(campaign_path, file_path, title):
-    """Processes a single file through the full pipeline, updating the database."""
-    print(f"\n--- Starting Full Pipeline for: {os.path.basename(file_path)} ---")
-    
-    print("\nStep 1: Converting to M4A and Normalizing...")
-    episode_id = convert_to_m4a(campaign_path, file_path, title)
-    if not episode_id:
-        print("Normalization/conversion failed. Aborting pipeline.")
-        return
-    episode = db.get_episode_by_id(campaign_path, episode_id)
-    print(f"Normalized audio and created Episode #{episode['episode_number']}.")
+#==============================================================================
+# MENU WRAPPER FUNCTIONS
+#==============================================================================
 
-    print("\nStep 2: Transcribing Audio...")
-    revised_txt_file_path = transcribe_and_revise_audio(campaign_path, episode_id)
-    if not revised_txt_file_path:
-        print("Transcription failed. Aborting pipeline.")
-        return
-    print(f"Revised transcription created: {os.path.basename(revised_txt_file_path)}")
+def process_new_file_wrapper():
+    """Wrapper for the full file processing pipeline."""
+    campaign_path = select_campaign()
+    if not campaign_path: return
 
-    print("\nStep 3: Generating Summary and Chapters...")
-    generate_summary_and_chapters(campaign_path, episode_id)
+    recent_files = search_audio_files()
+    file_to_process = None
 
-    print("\nStep 4: Updating Combined Campaign Files...")
-    transcribe_combine(campaign_path)
-    collate_summaries(campaign_path)
-    
-    print(f"\n--- Full Pipeline Completed for: {episode['episode_title']} ---")
-
-def select_file(campaign_path=None):
-    """Handles file selection, preferring recent un-tracked files or file explorer."""
-    recent_files = search_audio_files() # Returns absolute paths of untracked files
-    options = []
     if recent_files:
-        print("\nRecent Untracked Audio Files:")
-        for i, file_abs_path in enumerate(recent_files):
-            display_path = os.path.relpath(file_abs_path, get_working_directory())
-            options.append((file_abs_path, f"{i+1}. {display_path}"))
-    
-    if filedialog:
-        options.append(("f_explorer_sentinel", "f. Open File Explorer"))
-    
-    if not options:
-        print("No recent untracked files found and file explorer is not available.")
-        return None
+        options = [os.path.basename(fp) for fp in recent_files]
+        if filedialog:
+            options.append("Browse for file...")
+        
+        chosen_option = choose_from_list(options, "Select a recent untracked file, or browse")
+        if not chosen_option: return
 
-    selected = display_menu("Select a File to Process", options)
-    if not selected: return None
-
-    if selected[0] == "f_explorer_sentinel":
-        return handle_file_explorer()
+        if chosen_option == "Browse for file...":
+            file_to_process = filedialog.askopenfilename(title="Select audio file to process")
+        else:
+            file_to_process = recent_files[options.index(chosen_option)]
+    elif filedialog:
+        file_to_process = filedialog.askopenfilename(title="Select audio file to process")
     else:
-        return selected[0]
+        print("No recent untracked files found and file dialog is unavailable.")
+        return
 
-def move_file_to_campaign(file_path, campaign_folder_path):
-    """Moves a file to a campaign's 'Audio Files' folder."""
-    audio_files_folder = find_audio_files_folder(campaign_folder_path)
-    if not audio_files_folder:
-        print("Could not find or create audio folder. Cannot move file.")
-        return None
+    if not file_to_process or not os.path.exists(file_to_process):
+        print("No file selected or file does not exist.")
+        return
 
-    new_file_path_abs = os.path.join(audio_files_folder, os.path.basename(file_path))
-    if os.path.exists(new_file_path_abs):
-        if not get_yes_no_input(f"File '{os.path.basename(file_path)}' already exists in destination. Overwrite?"):
-            return None
-    try:
-        os.rename(file_path, new_file_path_abs)
-        print(f"File moved to {new_file_path_abs}")
-        return new_file_path_abs
-    except Exception as e:
-        print(f"Error moving file: {e}")
-        return None
+    final_file_path = move_file_to_campaign(file_to_process, campaign_path)
+    if not final_file_path: return
 
-def handle_file_explorer():
-    if not filedialog: return None
-    root = Tk(); root.withdraw()
-    file_path = filedialog.askopenfilename(
-        initialdir=get_working_directory(),
-        title="Select Audio File",
-        filetypes=(("Audio Files", "*.wav *.m4a *.flac *.mp3"), ("all files", "*.*"))
-    )
-    root.destroy()
-    return file_path
+    title_from_filename = re.sub(r"^\d{4}[_-]\d{2}[_-]\d{2}_?", "", os.path.splitext(os.path.basename(final_file_path))[0]).replace("_", " ").strip()
+    title = input(f"Enter episode title (default: '{title_from_filename}'): ") or title_from_filename
+    
+    process_full_pipeline(campaign_path, final_file_path, title)
+
+def chained_processing_wrapper():
+    """
+    Wrapper for processing a chain of episodes from a selected start point.
+    This is the re-introduced missing feature.
+    """
+    campaign_path = select_campaign()
+    if not campaign_path: return
+
+    episodes = db.get_episodes_for_campaign(campaign_path)
+    if not episodes:
+        print("No episodes in this campaign to process.")
+        return
+
+    selected_episode, start_index = select_episode(campaign_path, "Select the STARTING episode for the chain", return_index=True)
+    if not selected_episode: return
+    
+    episodes_to_process = episodes[start_index:]
+    if get_yes_no_input(f"Process episode #{selected_episode['episode_number']} and all {len(episodes_to_process)-1} subsequent episodes?", "y"):
+        print(f"\nStarting chained processing for {len(episodes_to_process)} episodes...")
+
+        for episode in tqdm(episodes_to_process, desc="Chained Processing Progress"):
+            print(f"\n>>> Processing Episode #{episode['episode_number']}: {episode['episode_title']} <<<")
+            
+            # We need to refresh the episode's status inside the loop
+            current_status = db.get_episode_by_id(campaign_path, episode['episode_id'])
+            
+            if not current_status['normalized']:
+                print("Episode is not normalized. Cannot continue chain. Please run normalization first.")
+                continue # or break, depending on desired behavior
+            
+            if not current_status['transcribed']:
+                print("  - Transcribing audio...")
+                transcribe_and_revise_audio(campaign_path, episode['episode_id'])
+            
+            # Refresh status again after transcription
+            current_status = db.get_episode_by_id(campaign_path, episode['episode_id'])
+            if current_status['text_processed'] and not current_status['summarized']:
+                print("  - Generating summary and chapters...")
+                generate_summary_and_chapters(campaign_path, episode['episode_id'])
+        
+        print("\nChained processing complete. Updating combined campaign files...")
+        transcribe_combine(campaign_path)
+        collate_summaries(campaign_path)
+
 
 def bulk_operations_wrapper():
     """Handles the 'Bulk Operations' menu option."""
     campaign_path = select_campaign()
     if not campaign_path: return
 
-    bulk_op_menu_options = [
-        (bulk_normalize_audio, "1. Normalize All New Audio"),
-        (bulk_transcribe_audio, "2. Transcribe All Un-transcribed Episodes"),
-        (bulk_summarize_transcripts, "3. Summarize All Un-summarized Transcripts"),
-        (lambda p: (transcribe_combine(p), collate_summaries(p)), "4. Update All Combined Campaign Files"),
-    ]
+    menu_map = {
+        "1": ("Normalize All New Audio", bulk_normalize_audio),
+        "2": ("Transcribe All Un-transcribed Episodes", bulk_transcribe_audio),
+        "3": ("Summarize All Un-summarized Transcripts", bulk_summarize_transcripts),
+        "4": ("Update All Combined Campaign Files", lambda p: (transcribe_combine(p), collate_summaries(p))),
+    }
+    menu_options = [(k, v[0]) for k, v in menu_map.items()]
 
-    selected_option = display_menu(f"Bulk Operations for {os.path.basename(campaign_path)}", bulk_op_menu_options)
-    if not selected_option: return
-    
-    operation_func = selected_option[0]
-    print(f"\nStarting bulk operation: {selected_option[1]}...")
-    operation_func(campaign_path)
-    print("Bulk operation finished.")
+    choice = display_menu(f"Bulk Operations for {os.path.basename(campaign_path)}", menu_options)
+    if choice in menu_map:
+        operation_name, operation_func = menu_map[choice]
+        print(f"\nStarting bulk operation: {operation_name}...")
+        operation_func(campaign_path)
+        print("Bulk operation finished.")
+    elif choice is not None and choice != 'x':
+        print("Invalid choice.")
 
-def campaign_tools_wrapper():
-    """Menu for campaign-specific tools like re-transcribe, re-summarise."""
+def episode_management_wrapper():
+    """Menu for editing individual episode data."""
     campaign_path = select_campaign()
     if not campaign_path: return
 
-    tools_menu_options = [
-        (retranscribe_single_file, "1. Re-Transcribe a Single Episode"),
-        (resummarise_single_file, "2. Re-Summarise a Single Episode"),
-        (open_campaign_files, "3. Open Campaign Files"),
-    ]
-    
     while True:
-        selected_option = display_menu(f"Tools for {os.path.basename(campaign_path)}", tools_menu_options)
-        if selected_option is None: break
-        
-        # Pass campaign_path to the selected function
-        selected_option[0](campaign_path)
+        selected_episode = select_episode(campaign_path, "Select Episode to Manage")
+        if not selected_episode: break
 
-def open_campaign_files(campaign_path):
-    """Opens campaign-specific files by reading from the DB."""
-    episodes = db.get_episodes_for_campaign(campaign_path)
-    if not episodes:
-        print("No episodes found in this campaign's database.")
+        current_episode = db.get_episode_by_id(campaign_path, selected_episode['episode_id'])
+        print(f"\n--- Managing Episode #{current_episode['episode_number']}: {current_episode['episode_title']} ---")
+        
+        menu_map = {
+            "1": ("Edit Title", "episode_title"),
+            "2": ("Edit Season Number", "season_number"),
+            "3": ("Edit Recorded Date (YYYY-MM-DD)", "recorded_date"),
+            "4": ("Re-transcribe this episode", "retranscribe"),
+            "5": ("Re-summarise this episode", "resummarise"),
+            "c": ("Clear All Processing Flags", "clear_status"),
+        }
+        menu_options = [(k, v[0]) for k, v in menu_map.items()]
+        
+        choice = display_menu(f"Edit options for '{current_episode['episode_title']}'", menu_options)
+        if choice == 'x': break
+        if choice not in menu_map: 
+            print("Invalid choice.")
+            continue
+            
+        action = menu_map[choice][1]
+        episode_id = current_episode['episode_id']
+        
+        if action == "retranscribe":
+            retranscribe_single_file(campaign_path)
+            break # Exit to main menu after this complex action
+        elif action == "resummarise":
+            resummarise_single_file(campaign_path)
+            break # Exit to main menu
+        elif action == "clear_status":
+            if get_yes_no_input("This will reset all processing flags for this episode. Are you sure?", "n"):
+                db.clear_processing_status(campaign_path, episode_id)
+        else:
+            new_value = input(f"Enter new value for {action.replace('_', ' ')}: ")
+            if new_value:
+                try:
+                    if action == 'season_number':
+                        new_value = int(new_value)
+                    elif action == 'recorded_date':
+                        datetime.strptime(new_value, '%Y-%m-%d')
+                    db.update_episode_data(campaign_path, episode_id, {action: new_value})
+                    print("Update successful.")
+                except ValueError:
+                    print("Invalid format. Please check your input (e.g., season must be a number, date must be YYYY-MM-DD).")
+
+def database_tools_wrapper():
+    """Menu for DB-related tasks like migration and integrity checks."""
+    campaign_path = select_campaign()
+    if not campaign_path: return
+
+    menu_map = {
+        "1": ("Run Data Migration (Scan files to DB)", data_migration.run_migration_for_campaign),
+        "2": ("Automated Dictionary Update", dictionary_update_wrapper),
+        "3": ("Check Database Integrity (Find broken links)", "integrity"),
+        "4": ("Open Database File (Advanced)", lambda p: open_file(os.path.join(p, db.DATABASE_NAME))),
+    }
+    menu_options = [(k, v[0]) for k, v in menu_map.items()]
+    
+    choice = display_menu(f"Database Tools for {os.path.basename(campaign_path)}", menu_options)
+    
+    if choice == "3": # Special handling for integrity check
+        print("\nChecking database for broken file links...")
+        problems = db.check_database_integrity(campaign_path)
+        if not problems:
+            print("Integrity check passed. No missing files found.")
+        else:
+            print(f"Found {len(problems)} issues:")
+            for p in problems:
+                print(f"  - Ep #{p['episode_id']} ({p['episode_title']}): Missing '{p['field']}' -> {p['path']}")
+            
+            if get_yes_no_input("\nDo you want to remove these broken links from the database records?", "n"):
+                cleared_count = db.clear_invalid_paths(campaign_path, problems)
+                print(f"Removed {cleared_count} invalid file links from the database.")
+    elif choice in menu_map:
+        menu_map[choice][1](campaign_path)
+
+    if choice != 'x':
+        input("\nPress Enter to continue...")
+
+#==============================================================================
+# MAIN EXECUTION BLOCK
+#==============================================================================
+
+def main():
+    """Main function for the sessionscribe application."""
+    if len(sys.argv) > 1:
+        process_file_from_command_line(sys.argv[1])
         return
 
-    file_choices = []
-    for ep in episodes:
-        if ep['normalized_audio_file']: file_choices.append((os.path.join(campaign_path, ep['normalized_audio_file']), f"Episode {ep['episode_number']} - Audio"))
-        if ep['transcription_file']: file_choices.append((os.path.join(campaign_path, ep['transcription_file']), f"Episode {ep['episode_number']} - Transcript"))
-        if ep['summary_file']: file_choices.append((os.path.join(campaign_path, ep['summary_file']), f"Episode {ep['episode_number']} - Summary"))
-        if ep['chapters_file']: file_choices.append((os.path.join(campaign_path, ep['chapters_file']), f"Episode {ep['episode_number']} - Chapters"))
-    
-    combined_trans_path = os.path.join(campaign_path, f"{os.path.basename(campaign_path)} - Transcriptions Combined.txt")
-    if os.path.exists(combined_trans_path):
-        file_choices.append((combined_trans_path, "Combined Campaign Transcript"))
+    working_directory = get_working_directory()
+    print("Initializing campaign databases...")
+    for campaign_name in os.listdir(working_directory):
+        campaign_path = os.path.join(working_directory, campaign_name)
+        if os.path.isdir(campaign_path) and not campaign_name.startswith('.'):
+            db.init_campaign_db(campaign_path)
 
-    collated_summary_path = os.path.join(campaign_path, f"{os.path.basename(campaign_path)} - Collated Summaries.txt")
-    if os.path.exists(collated_summary_path):
-        file_choices.append((collated_summary_path, "Collated Campaign Summaries"))
+    # C-IMPROVEMENT: Main menu is now cleaner and includes Chained Processing
+    menu_map = {
+        "1": ("Process New Audio File (Full Pipeline)", process_new_file_wrapper),
+        "2": ("Chained Processing (From an episode)", chained_processing_wrapper),
+        "3": ("Bulk Operations (For a Campaign)", bulk_operations_wrapper),
+        "4": ("Episode Management", episode_management_wrapper),
+        "5": ("Database & Dictionary Tools", database_tools_wrapper),
+        "6": ("Create New Campaign", lambda: generate_new_campaign(input("Enter new campaign name: "), input("Enter abbreviation: "), get_working_directory())),
+    }
+    menu_options = [(k, v[0]) for k, v in menu_map.items()]
 
-    selected_file = display_menu(f"Files for {os.path.basename(campaign_path)}", file_choices)
-    if selected_file:
-        open_file(selected_file[0])
+    while True:
+        choice = display_menu("sessionscribe - Main Menu", menu_options)
+        if choice == 'x':
+            print("Exiting...")
+            break
+        
+        if choice in menu_map:
+            menu_map[choice][1]()
+        else:
+            print("Invalid choice. Please try again.")
 
-def open_file(file_path):
-    """Opens a file using the default system application."""
-    abs_file_path = os.path.abspath(file_path)
-    if not os.path.exists(abs_file_path):
-        print(
+if __name__ == "__main__":
+    main()

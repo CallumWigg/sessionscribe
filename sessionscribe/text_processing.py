@@ -5,159 +5,103 @@ import csv
 from collections import defaultdict
 import wn
 
-import ffmpeg
-from phonetics import metaphone
 from rapidfuzz import fuzz, process
 from spellchecker import SpellChecker
 
-from . import utils, database_management as db # Assuming utils.py and db are in the same package
+from . import utils, database_management as db
 
-# Caches are now dictionaries keyed by campaign_path
-_phonetic_dict_cache = {}
-_spell_checker_cache = {}
+# C-IMPROVEMENT: Global caches are removed in favor of the CampaignContext object.
+# C-IMPROVEMENT: A single, shared spell checker instance can be used across campaigns,
+# but custom words are now managed by the context.
+_spell_checker = None
 
-def get_phonetic_dict(campaign_path):
+def get_global_spell_checker():
     """
-    Generates or retrieves a cached phonetic dictionary for a specific campaign.
+    Returns a globally shared spell checker populated with standard English words.
+    Campaign-specific words are handled separately by the CampaignContext.
     """
-    global _phonetic_dict_cache
-    if campaign_path in _phonetic_dict_cache:
-        return _phonetic_dict_cache[campaign_path]
+    global _spell_checker
+    if _spell_checker is not None:
+        return _spell_checker
     
-    phonetic_dict = {metaphone(word): word for word in utils.load_custom_words(campaign_path)}
-    _phonetic_dict_cache[campaign_path] = phonetic_dict
-    return phonetic_dict
-
-def get_spell_checker(campaign_path):
-    """
-    Returns a spell checker populated with the campaign's custom word list and WordNet.
-    """
-    global _spell_checker_cache
-    if campaign_path in _spell_checker_cache:
-        return _spell_checker_cache[campaign_path]
-        
+    print("Initializing global spell checker (one-time setup)...")
     spell_checker = SpellChecker()
-    # Add custom words from the campaign's wack_dictionary.txt
-    spell_checker.word_frequency.load_words(utils.load_custom_words(campaign_path))
-    
+    # Add common contractions and possessives that spellchecker might miss.
     contractions_possessives = [
-        "i'll", "i've", "he's", "she's", "it's", "we're", "they're", "i'm", "you're", 
-        "aren't", "can't", "couldn't", "didn't", "doesn't", "don't", "hadn't", 
-        "hasn't", "haven't", "isn't", "mustn't", "shan't", "shouldn't", "wasn't", 
-        "weren't", "won't", "wouldn't", "he'll", "she'll", "it'll", "we'll", 
-        "they'll", "i'd", "you'd", "he'd", "she'd", "we'd", "they'd", "that's", 
-        "what's", "who's", "where's", "when's", "why's", "how's", "here's", "there's"
+        "i'll", "i've", "he's", "she's", "it's", "we're", "they're", "i'm", "you're", "can't", "don't",
+        "won't", "shouldn't", "couldn't", "wouldn't", "isn't", "aren't", "wasn't", "weren't",
+        "that's", "what's", "who's", "where's", "when's", "why's", "how's", "here's", "there's"
     ]
     spell_checker.word_frequency.load_words(contractions_possessives)
-        
+    
+    # Attempt to load WordNet for a more comprehensive dictionary
     try:
-        try:
-            en = wn.Wordnet('oewn:2023')
-        except wn.lexicon.LexiconError:
-            try:
-                print("WordNet 'oewn:2023' not found, trying default 'oewn'...")
-                wn.download('oewn')
-                en = wn.Wordnet('oewn')
-            except Exception as e_wn_download:
-                print(f"Could not download/load WordNet 'oewn': {e_wn_download}.")
-                en = None
-        if en:
-            wordnet_words = [form for word_obj in en.words() for form in word_obj.forms()]
-            spell_checker.word_frequency.load_words(wordnet_words)
-    except Exception as e:
-        print(f"Error loading WordNet words: {e}.")
-
-    _spell_checker_cache[campaign_path] = spell_checker
-    return spell_checker
+        wn.download('oewn:2023')
+        en = wn.Wordnet('oewn:2023')
+        wordnet_words = [form for word_obj in en.words() for form in word_obj.forms()]
+        spell_checker.word_frequency.load_words(wordnet_words)
+        print("WordNet dictionary loaded successfully.")
+    except Exception:
+        print("Could not download or load WordNet 'oewn:2023'. Spell checking will be less comprehensive.")
+        
+    _spell_checker = spell_checker
+    return _spell_checker
 
 
-def process_text(text, campaign_path, case_insensitive=True):
+def process_text(text, context: utils.CampaignContext, case_insensitive=True):
     """
-    Applies all correction steps to the input text in a single pass, using campaign-specific dictionaries.
+    Applies all correction steps to the input text in a single pass, using a CampaignContext.
     """
-    if not text:
+    if not text or not context:
         return ""
 
-    custom_words_set = set(utils.load_custom_words(campaign_path))
-    replacements_dict = load_corrections_as_dict(campaign_path)
-    spell_checker = get_spell_checker(campaign_path)
-    current_phonetic_dict = get_phonetic_dict(campaign_path)
+    # C-IMPROVEMENT: All required dictionaries are fetched efficiently from the context object.
+    corrections = context.corrections_dict
+    phonetic_dict = context.phonetic_dict
+    custom_words_set = set(word.lower() for word in context.custom_words) # Lowercase for matching
 
     corrected_words_list = []
-    words_and_delimiters = re.findall(r"(\b[\w'-]+\b|[\W_]+)", text)
-    if not words_and_delimiters and text:
-        words_and_delimiters = [text]
+    # Regex to split text into words and non-words (punctuation, spaces)
+    tokens = re.findall(r"(\b[\w'-]+\b|[\W_]+)", text)
 
-    for token in words_and_delimiters:
-        original_token = token
-        is_word = bool(re.fullmatch(r"\b[\w'-]+\b", token))
-
+    for token in tokens:
+        is_word = bool(re.fullmatch(r"[\w'-]+", token))
+        
         if not is_word:
-            corrected_words_list.append(original_token)
-            continue
-
-        word_to_check = token.lower() if case_insensitive else token
-
-        if word_to_check in custom_words_set or token in custom_words_set:
-            corrected_words_list.append(original_token)
-            continue
-
-        if spell_checker.known([word_to_check]):
-            corrected_words_list.append(original_token)
+            corrected_words_list.append(token)
             continue
         
-        replacement_found = False
-        if token in replacements_dict:
-             corrected_words_list.append(replacements_dict[token])
-             replacement_found = True
-        elif case_insensitive and word_to_check in replacements_dict:
-            corrected_words_list.append(replacements_dict[word_to_check])
-            replacement_found = True
-        if replacement_found:
+        # Preserve original case for replacement if no correction is found
+        original_token = token
+        word_to_check = token.lower()
+
+        # 1. Direct match in custom dictionary (fastest check)
+        if word_to_check in custom_words_set:
+            corrected_words_list.append(original_token)
             continue
 
+        # 2. Direct match in corrections dictionary
+        if word_to_check in corrections:
+            corrected_words_list.append(corrections[word_to_check])
+            continue
+            
+        # 3. Phonetic match for custom words (handles sound-alike errors)
         phonetic_word = metaphone(word_to_check)
-        if phonetic_word in current_phonetic_dict:
-            corrected_words_list.append(current_phonetic_dict[phonetic_word])
+        if phonetic_word in phonetic_dict:
+            corrected_words_list.append(phonetic_dict[phonetic_word])
             continue
 
+        # 4. If no corrections apply, append the original token
         corrected_words_list.append(original_token)
 
     return "".join(corrected_words_list)
 
-def load_corrections_as_dict(campaign_path):
-    """Loads the campaign-specific corrections list from file into a dictionary."""
-    replacements_dict = {}
-    corrections_file = utils.get_corrections_list_file(campaign_path)
-    if not os.path.exists(corrections_file):
-        try:
-            with open(corrections_file, 'w', encoding='utf-8') as f:
-                f.write(f"# Campaign: {os.path.basename(campaign_path)}\n")
-                f.write("# Add corrections in the format: mispelled -> corrected\n")
-            return {}
-        except IOError as e:
-            print(f"Error creating corrections file: {e}")
-            return {}
 
-    try:
-        with open(corrections_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if ' -> ' in line:
-                    original, replacement = line.split(' -> ', 1)
-                    replacements_dict[original.strip()] = replacement.strip()
-    except Exception as e:
-        print(f"Error loading corrections file '{corrections_file}': {e}")
-    return replacements_dict
-
-
-def apply_corrections_and_formatting(campaign_path, episode_id, input_tsv_path, output_txt_path):
+def apply_corrections_and_formatting(context: utils.CampaignContext, episode_id, input_tsv_path, output_txt_path):
     """
-    Applies corrections and formatting. Now requires campaign_path and episode_id.
+    Applies corrections and formatting using the campaign context.
     """
-    episode = db.get_episode_by_id(campaign_path, episode_id)
+    episode = db.get_episode_by_id(context.campaign_path, episode_id)
     if not episode:
         print(f"Error: Could not find episode {episode_id} in database for formatting.")
         return None
@@ -167,7 +111,7 @@ def apply_corrections_and_formatting(campaign_path, episode_id, input_tsv_path, 
     
     try:
         recorded_date = datetime.strptime(episode['recorded_date'], '%Y-%m-%d')
-        formatted_date = recorded_date.strftime('%d/%m/%Y')
+        formatted_date = recorded_date.strftime('%d %B %Y') # A more readable date format
     except (TypeError, ValueError):
         formatted_date = "Unknown Date"
 
@@ -175,24 +119,22 @@ def apply_corrections_and_formatting(campaign_path, episode_id, input_tsv_path, 
         with open(input_tsv_path, 'r', encoding='utf-8', newline='') as f_in, \
              open(output_txt_path, 'w', encoding='utf-8') as f_out:
 
-            f_out.write(f"{title} - #{track_num} - {formatted_date}\n\n")
+            f_out.write(f"{title} - Episode {track_num}\nRecorded on {formatted_date}\n\n")
 
             tsv_reader = csv.reader(f_in, delimiter='\t')
-            header = next(tsv_reader, None)
+            next(tsv_reader, None) # Skip header
 
             for row in tsv_reader:
                 if len(row) >= 3:
                     start_time_str, _, caption = row[:3]
-                    formatted_start_time = utils.format_time(start_time_str, 'seconds')
-                    # Pass campaign_path to process_text
-                    corrected_caption = process_text(caption, campaign_path)
-                    f_out.write(f"{formatted_start_time}   |   {corrected_caption}\n")
-                elif len(row) > 0:
-                    print(f"Warning: Skipping malformed row in {input_tsv_path}: {row}")
+                    formatted_start_time = utils.format_time(start_time_str)
+                    # C-IMPROVEMENT: Pass the context object to process_text
+                    corrected_caption = process_text(caption, context)
+                    f_out.write(f"{formatted_start_time} | {corrected_caption.strip()}\n")
         
-        # Update DB
-        db.update_episode_path(campaign_path, episode_id, "transcription_file", output_txt_path)
-        db.update_processing_status(campaign_path, episode_id, text_processed=True)
+        # Update DB with relative path
+        db.update_episode_path(context.campaign_path, episode_id, "transcription_file", output_txt_path)
+        db.update_processing_status(context.campaign_path, episode_id, text_processed=True)
         return output_txt_path
 
     except Exception as e:
@@ -200,14 +142,18 @@ def apply_corrections_and_formatting(campaign_path, episode_id, input_tsv_path, 
         return None
 
 
-def dictionary_update(campaign_path, txt_path):
+def dictionary_update(context: utils.CampaignContext, txt_path):
     """
-    Updates the campaign's dictionary (corrections.txt) with unknown words.
+    Scans a processed transcript and AUTOMATICALLY adds high-confidence corrections
+    to the campaign's corrections.txt file.
     """
     if not os.path.exists(txt_path):
         print(f"Error: Cannot update dictionary, file not found: {txt_path}")
         return
 
+    print(f"\nRunning automated dictionary update for {os.path.basename(txt_path)}...")
+    
+    # 1. Gather all unique words from the transcript
     try:
         with open(txt_path, "r", encoding="utf-8") as file:
             text_content = file.read()
@@ -215,43 +161,53 @@ def dictionary_update(campaign_path, txt_path):
         print(f"Error reading file {txt_path} for dictionary update: {e}")
         return
 
-    words_to_check = set()
-    for line in text_content.splitlines():
-        if "|" in line:
-            caption_part = line.split("|", 1)[1]
-            words_to_check.update(re.findall(r"\b[\w'-]+\b", caption_part.lower()))
+    words_in_transcript = set(re.findall(r"\b[a-zA-Z'-]+\b", text_content.lower()))
 
-    spell_checker = get_spell_checker(campaign_path)
-    custom_words_set = set(word.lower() for word in utils.load_custom_words(campaign_path))
-    existing_corrections = load_corrections_as_dict(campaign_path)
-    words_to_add_to_corrections = []
+    # 2. Get all known words for this context
+    spell_checker = get_global_spell_checker()
+    known_global_words = spell_checker.known(words_in_transcript)
+    known_custom_words = set(word.lower() for word in context.custom_words)
+    already_corrected = set(context.corrections_dict.keys())
+    
+    # 3. Find all unknown words by removing all known words from the transcript set
+    unknown_words = words_in_transcript - known_global_words - known_custom_words - already_corrected
 
-    for word in sorted(list(words_to_check)):
-        if not word: continue
+    if not unknown_words:
+        print("No new unknown words found. Dictionary is up to date for this file.")
+        return
+        
+    if not context.custom_words:
+        print("Warning: `wack_dictionary.txt` is empty. Cannot generate automatic corrections.")
+        print("Please add proper nouns (character names, places) to the dictionary first.")
+        return
 
-        is_known_by_spellchecker = bool(spell_checker.known([word]))
-        is_in_custom_dict = word in custom_words_set
-        is_in_corrections_keys = word in existing_corrections 
+    # 4. For each unknown word, find the best fuzzy match in the custom dictionary
+    print(f"Found {len(unknown_words)} potential new words to correct. Analyzing...")
+    new_corrections = {}
+    
+    # Use rapidfuzz to find the best match for each unknown word from the custom list
+    # This is much faster than iterating one by one
+    for unknown_word in unknown_words:
+        # We find the best match from the list of correctly spelled custom words
+        result = process.extractOne(unknown_word, context.custom_words, scorer=fuzz.WRatio, score_cutoff=utils.config["dictionaries"]["correction_threshold"])
+        if result:
+            best_match_word = result[0]
+            score = result[1]
+            # We check to make sure we aren't creating a circular correction
+            if unknown_word != best_match_word.lower():
+                new_corrections[unknown_word] = best_match_word
+                print(f"  - Found correction: '{unknown_word}' -> '{best_match_word}' (Score: {score:.1f})")
 
-        if not is_known_by_spellchecker and not is_in_custom_dict and not is_in_corrections_keys:
-            if custom_words_set:
-                best_match_custom, score_custom, _ = process.extractOne(word, custom_words_set, scorer=fuzz.WRatio)
-                if score_custom < utils.config["dictionaries"]["correction_threshold"]:
-                    words_to_add_to_corrections.append(word)
-            else:
-                 words_to_add_to_corrections.append(word)
-
-    if words_to_add_to_corrections:
-        print(f"\nFound {len(words_to_add_to_corrections)} potential new words for corrections.txt for this campaign:")
-        corrections_file_path = utils.get_corrections_list_file(campaign_path)
+    # 5. Append the new, high-confidence corrections to the file
+    if new_corrections:
+        corrections_file_path = utils.get_corrections_list_file(context.campaign_path)
         try:
             with open(corrections_file_path, "a", encoding="utf-8") as f:
-                f.write(f"\n# Potential additions from {os.path.basename(txt_path)} ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n")
-                for word in sorted(list(set(words_to_add_to_corrections))):
-                    print(f"  - {word}")
-                    f.write(f"{word} -> \n")
-            print(f"Appended suggestions to {corrections_file_path}. Please review and complete the corrections.")
+                f.write(f"\n# --- Automated additions from {os.path.basename(txt_path)} on {datetime.now().strftime('%Y-%m-%d %H:%M')} ---\n")
+                for original, corrected in sorted(new_corrections.items()):
+                    f.write(f"{original} -> {corrected}\n")
+            print(f"\nSuccessfully added {len(new_corrections)} new rules to {os.path.basename(corrections_file_path)}.")
         except Exception as e:
             print(f"Error writing to corrections file {corrections_file_path}: {e}")
     else:
-        print(f"No new unknown words found in {os.path.basename(txt_path)} for dictionary update.")
+        print("No new high-confidence corrections were found.")

@@ -70,7 +70,7 @@ def convert_to_m4a(campaign_path, file_path, title):
         (
             ffmpeg
             .input(file_path)
-            .filter("loudnorm")
+            .filter("loudnorm", i=-14, tp=-1.0, print_format='json') 
             .output(
                 output_path_abs, acodec='aac', ab=f"{target_bitrate_kbps}k",
                 ac=config["podcasts"]["audio_channels"], ar=config["podcasts"]["sampling_rate"]
@@ -131,7 +131,6 @@ def convert_to_m4a(campaign_path, file_path, title):
 
 def search_audio_files():
     """Searches working directory for audio files not yet in any campaign DB."""
-    ## C-IMPROVEMENT: This function is now dramatically more efficient.
     ## It loads all tracked paths from all databases ONCE, then checks against that set.
     working_dir = get_working_directory()
     

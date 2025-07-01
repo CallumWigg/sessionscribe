@@ -12,16 +12,17 @@ except ImportError:
     print("Warning: tkinter not found. File dialog functionality will be disabled.")
 
 from .audio_processing import convert_to_m4a, search_audio_files, bulk_normalize_audio
-from .transcription import transcribe_and_revise_audio
+from .transcription import transcribe_and_revise_audio, bulk_transcribe_audio
 from .summarisation import generate_summary_and_chapters, collate_summaries, bulk_summarize_transcripts
 from .file_management import (
-    retranscribe_single_file, resummarise_single_file, generate_new_campaign, 
-    transcribe_combine, find_audio_files_folder, dictionary_update_wrapper
+    generate_new_campaign, transcribe_combine, 
+    find_audio_files_folder, find_transcriptions_folder
 )
 from .user_interaction import choose_from_list, get_yes_no_input
-from .utils import get_working_directory, config
+from .utils import get_working_directory, config, CampaignContext
 from . import database_management as db
 from . import data_migration
+from .text_processing import dictionary_update
 
 
 def display_menu(menu_title, menu_options):
@@ -129,13 +130,13 @@ def process_full_pipeline(campaign_path, file_path, title):
     if not episode_id:
         print("Normalization/conversion failed. Aborting pipeline.")
         return
-
-    # Refetch episode data to ensure all fields are current
     episode = db.get_episode_by_id(campaign_path, episode_id)
     print(f"Normalized audio and created Episode #{episode['episode_number']}.")
 
+    # ## FIX: Find transcription dir before calling transcribe
+    trans_dir = find_transcriptions_folder(campaign_path)
     print("\n[Step 2/4] Transcribing Audio...")
-    revised_txt_file_path = transcribe_and_revise_audio(campaign_path, episode_id)
+    revised_txt_file_path = transcribe_and_revise_audio(campaign_path, episode_id, trans_dir)
     if not revised_txt_file_path:
         print("Transcription failed. Aborting pipeline.")
         return
@@ -180,6 +181,75 @@ def process_file_from_command_line(file_path):
     
     process_full_pipeline(campaign_path, final_file_path, title)
     input("\nProcessing complete. Press Enter to exit.")
+
+def retranscribe_single_file(campaign_path):
+    """Retranscribe a single episode from the campaign."""
+    episodes = db.get_episodes_for_campaign(campaign_path, "WHERE ps.normalized = TRUE")
+    if not episodes:
+        print("No normalized episodes available for retranscription.")
+        return
+
+    selected_episode = select_episode(campaign_path, "Select episode to retranscribe")
+    if not selected_episode: return
+    
+    # ## FIX: Find the folder and pass it to the transcription function.
+    trans_dir = find_transcriptions_folder(campaign_path)
+    if not trans_dir:
+        print("Could not find transcriptions folder. Aborting.")
+        return
+        
+    print(f"\nRetranscribing: {selected_episode['episode_title']}...")
+    revised_txt_file_path = transcribe_and_revise_audio(campaign_path, selected_episode['episode_id'], trans_dir)
+
+    if not revised_txt_file_path:
+        print("Retranscription failed.")
+        return
+
+    print("Retranscription successful. Updating related files...")
+    transcribe_combine(campaign_path)
+    generate_summary_and_chapters(campaign_path, selected_episode['episode_id'])
+    collate_summaries(campaign_path)
+    print("\nRetranscription and update process complete.")
+
+
+def resummarise_single_file(campaign_path):
+    """Resummarise a single episode from the campaign."""
+    episodes = db.get_episodes_for_campaign(campaign_path, "WHERE ps.text_processed = TRUE")
+    if not episodes:
+        print("No processed transcripts available for re-summarisation.")
+        return
+
+    selected_episode = select_episode(campaign_path, "Select episode to re-summarise")
+    if not selected_episode: return
+
+    print(f"\nGenerating summary and chapters for: {selected_episode['episode_title']}...")
+    generate_summary_and_chapters(campaign_path, selected_episode['episode_id'])
+    
+    print("\nCollating all campaign summaries...")
+    collate_summaries(campaign_path)
+    print("\nRe-summarisation process complete.")
+    
+def dictionary_update_wrapper(campaign_path):
+    """Wrapper to run the automated dictionary update on a selected transcript."""
+    episodes = db.get_episodes_for_campaign(campaign_path, "WHERE ps.text_processed = TRUE")
+    if not episodes:
+        print("No processed transcripts available to build dictionary from.")
+        return
+
+    selected_episode = select_episode(campaign_path, "Select a transcript to analyze for new words")
+    if not selected_episode: return
+    
+    if not selected_episode['transcription_file']:
+        print("Error: Selected episode has no transcript file path in the database.")
+        return
+        
+    transcript_path = os.path.join(campaign_path, selected_episode['transcription_file'])
+    if not os.path.exists(transcript_path):
+        print(f"Error: Transcript file not found on disk: {transcript_path}")
+        return
+
+    context = CampaignContext(campaign_path)
+    dictionary_update(context, transcript_path)
 
 #==============================================================================
 # MENU WRAPPER FUNCTIONS
@@ -323,10 +393,10 @@ def episode_management_wrapper():
         
         if action == "retranscribe":
             retranscribe_single_file(campaign_path)
-            break # Exit to main menu after this complex action
+            break
         elif action == "resummarise":
             resummarise_single_file(campaign_path)
-            break # Exit to main menu
+            break
         elif action == "clear_status":
             if get_yes_no_input("This will reset all processing flags for this episode. Are you sure?", "n"):
                 db.clear_processing_status(campaign_path, episode_id)
@@ -394,7 +464,6 @@ def main():
         if os.path.isdir(campaign_path) and not campaign_name.startswith('.'):
             db.init_campaign_db(campaign_path)
 
-    # C-IMPROVEMENT: Main menu is now cleaner and includes Chained Processing
     menu_map = {
         "1": ("Process New Audio File (Full Pipeline)", process_new_file_wrapper),
         "2": ("Chained Processing (From an episode)", chained_processing_wrapper),

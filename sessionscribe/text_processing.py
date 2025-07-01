@@ -4,15 +4,14 @@ import re
 import csv
 from collections import defaultdict
 import wn
+import tempfile
 
 from rapidfuzz import fuzz, process
+from phonetics import metaphone
 from spellchecker import SpellChecker
 
 from . import utils, database_management as db
 
-# C-IMPROVEMENT: Global caches are removed in favor of the CampaignContext object.
-# C-IMPROVEMENT: A single, shared spell checker instance can be used across campaigns,
-# but custom words are now managed by the context.
 _spell_checker = None
 
 def get_global_spell_checker():
@@ -55,7 +54,6 @@ def process_text(text, context: utils.CampaignContext, case_insensitive=True):
     if not text or not context:
         return ""
 
-    # C-IMPROVEMENT: All required dictionaries are fetched efficiently from the context object.
     corrections = context.corrections_dict
     phonetic_dict = context.phonetic_dict
     custom_words_set = set(word.lower() for word in context.custom_words) # Lowercase for matching
@@ -99,7 +97,7 @@ def process_text(text, context: utils.CampaignContext, case_insensitive=True):
 
 def apply_corrections_and_formatting(context: utils.CampaignContext, episode_id, input_tsv_path, output_txt_path):
     """
-    Applies corrections and formatting using the campaign context.
+    Applies corrections and formatting using a safe, atomic write method.
     """
     episode = db.get_episode_by_id(context.campaign_path, episode_id)
     if not episode:
@@ -111,35 +109,42 @@ def apply_corrections_and_formatting(context: utils.CampaignContext, episode_id,
     
     try:
         recorded_date = datetime.strptime(episode['recorded_date'], '%Y-%m-%d')
-        formatted_date = recorded_date.strftime('%d %B %Y') # A more readable date format
+        formatted_date = recorded_date.strftime('%d %B %Y')
     except (TypeError, ValueError):
         formatted_date = "Unknown Date"
 
+    # Write to a temporary file first.
+    temp_file_handle, temp_file_path = tempfile.mkstemp(suffix=".txt", text=True)
+    
     try:
-        with open(input_tsv_path, 'r', encoding='utf-8', newline='') as f_in, \
-             open(output_txt_path, 'w', encoding='utf-8') as f_out:
+        with os.fdopen(temp_file_handle, 'w', encoding='utf-8') as f_out:
+            with open(input_tsv_path, 'r', encoding='utf-8', newline='') as f_in:
+                f_out.write(f"{title} - Episode {track_num}\nRecorded on {formatted_date}\n\n")
 
-            f_out.write(f"{title} - Episode {track_num}\nRecorded on {formatted_date}\n\n")
+                tsv_reader = csv.reader(f_in, delimiter='\t')
+                next(tsv_reader, None) # Skip header
 
-            tsv_reader = csv.reader(f_in, delimiter='\t')
-            next(tsv_reader, None) # Skip header
-
-            for row in tsv_reader:
-                if len(row) >= 3:
-                    start_time_str, _, caption = row[:3]
-                    formatted_start_time = utils.format_time(start_time_str)
-                    # C-IMPROVEMENT: Pass the context object to process_text
-                    corrected_caption = process_text(caption, context)
-                    f_out.write(f"{formatted_start_time} | {corrected_caption.strip()}\n")
+                for row in tsv_reader:
+                    if len(row) >= 3:
+                        start_time_str, _, caption = row[:3]
+                        formatted_start_time = utils.format_time(start_time_str)
+                        corrected_caption = process_text(caption, context)
+                        f_out.write(f"{formatted_start_time} | {corrected_caption.strip()}\n")
         
-        # Update DB with relative path
+        # If we get here, the temp file was written successfully. Now, replace the original.
+        os.replace(temp_file_path, output_txt_path)
+        
         db.update_episode_path(context.campaign_path, episode_id, "transcription_file", output_txt_path)
         db.update_processing_status(context.campaign_path, episode_id, text_processed=True)
         return output_txt_path
 
     except Exception as e:
         print(f"Error during apply_corrections_and_formatting for {input_tsv_path}: {e}")
+        # Clean up the temp file on failure
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
         return None
+
 
 
 def dictionary_update(context: utils.CampaignContext, txt_path):
